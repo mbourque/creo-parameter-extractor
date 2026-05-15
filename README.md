@@ -16,18 +16,20 @@ You do **not** open each part by hand or copy parameters from the Creo UI. You d
 
 ### Fields
 
-| Field | Purpose |
-|-------|---------|
-| **Models folder** | Directory containing your `.prt` files (and/or numbered backups like `part.prt.7`). Use **Browse…** to pick a folder. |
-| **CREOSON host** | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine. |
-| **Port** | CREOSON port (default `9056`). Must match your CREOSON setup. |
-| **Output file** | Path for the text report (e.g. `C:\reports\parameters.txt`). Use **Browse…** to choose. |
+
+| Field             | Purpose                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Models folder** | Directory containing your `.prt` files (and/or numbered backups like `part.prt.7`). Use **Browse…** to pick a folder.       |
+| **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine. |
+| **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                               |
+| **Output file**   | Path for the text report (e.g. `C:\reports\parameters.txt`). Use **Browse…** to choose.                                     |
+
 
 ### Run extraction
 
 1. Start **Creo Parametric** and wait until it is fully loaded (no blocking dialogs).
 2. Start **CREOSON** and confirm it is listening on the port you entered.
-3. Run this app — either double-click **`CreoPRTParameterExtractor.exe`** in the project folder, or from a terminal run `python prt_parameter_extractor.py` (Python install required for the latter; see **Installation and setup** below).
+3. Run this app — either double-click `**CreoPRTParameterExtractor.exe`** in the project folder, or from a terminal run `python prt_parameter_extractor.py` (Python install required for the latter; see **Installation and setup** below).
 4. Set **Models folder** and **Output file**.
 5. Click **Extract parameters**.
 6. Watch the **Log** area for progress. When finished, a dialog confirms success or lists errors.
@@ -46,7 +48,7 @@ The log should show `Checking TCP localhost:9056 …` then `Connecting to CREOSO
 
 For each logical part name in the models folder:
 
-- If **`name.prt`** exists, that file is used.
+- If `**name.prt`** exists, that file is used.
 - Otherwise the **highest numbered** backup is used (e.g. `name.prt.10` over `name.prt.9`).
 
 Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are opened by copying a temporary `*.prt` **in the same folder** (Creo cannot open `.prt.N` by name through CREOSON). The report still labels the section with the **original disk filename**.
@@ -75,13 +77,15 @@ If some files fail, the report still contains successful sections and an **Error
 
 ## Troubleshooting
 
-| Symptom | What to try |
-|---------|-------------|
-| Hangs at “Connecting to CREOSON…” then times out (~60s) | Start Creo first, then CREOSON. Dismiss any Creo modal dialogs. |
-| `Unknown Model Extension` | Usually an old issue with opening `.prt.N` directly; use the current version of this tool. |
-| `Pro/TOOLKIT … General Error` | Open the part manually in Creo; fix regen errors or missing references. Ensure related files sit in the same folder as the part. |
-| CREOSON **Stop** hangs | Exit Creo first, then stop CREOSON; or end the CREOSON/Java process in Task Manager. |
-| `0 .prt file(s) found` | Folder path wrong, or no files matching `*.prt` / `*.prt.N` in that directory. |
+
+| Symptom                                                 | What to try                                                                                                                      |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Hangs at “Connecting to CREOSON…” then times out (~60s) | Start Creo first, then CREOSON. Dismiss any Creo modal dialogs.                                                                  |
+| `Unknown Model Extension`                               | Usually an old issue with opening `.prt.N` directly; use the current version of this tool.                                       |
+| `Pro/TOOLKIT … General Error`                           | Open the part manually in Creo; fix regen errors or missing references. Ensure related files sit in the same folder as the part. |
+| CREOSON **Stop** hangs                                  | Exit Creo first, then stop CREOSON; or end the CREOSON/Java process in Task Manager.                                             |
+| `0 .prt file(s) found`                                  | Folder path wrong, or no files matching `*.prt` / `*.prt.N` in that directory.                                                   |
+
 
 ---
 
@@ -89,45 +93,32 @@ If some files fail, the report still contains successful sections and an **Error
 
 ### What you need
 
-| Requirement | Notes |
-|---------------|--------|
-| **Creo Parametric** | Must be **running** before you extract. CREOSON drives Creo through J-Link. |
-| **CREOSON** | Micro-server listening on a port (default **9056**). Start CREOSON after Creo is up. |
-| **J-Link** | Included with Creo (automation interface); may need to be enabled per your PTC install. |
-| **Python 3.10+** | Required to run this application (see below). |
+
+| Requirement         | Notes                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| **Creo Parametric** | Must be **running** before you extract. CREOSON drives Creo through J-Link.             |
+| **CREOSON**         | Micro-server listening on a port (default **9056**). Start CREOSON after Creo is up.    |
+| **J-Link**          | Included with Creo (automation interface); may need to be enabled per your PTC install. |
+| **Python 3.10+**    | Required to run this application (see below).                                           |
+
 
 Starting only the CREOSON Java server without a live Creo session will cause connection timeouts or failed opens.
 
 ### Install this application (Python)
 
 1. Open a terminal in this project folder.
-
 2. (Recommended) Create and activate a virtual environment:
-
-   ```bat
+  ```bat
    python -m venv venv
    venv\Scripts\activate
-   ```
-
+  ```
 3. Install dependencies:
-
-   ```bat
+  ```bat
    python -m pip install -r requirements.txt
-   ```
-
+  ```
 4. Run the application (pick one):
-
-   **Executable** (no Python needed on that PC):
-
-   ```bat
-   CreoPRTParameterExtractor.exe
-   ```
-
+  **Executable** (no Python needed on that PC):
    **From source** (after step 3 above):
-
-   ```bat
-   python prt_parameter_extractor.py
-   ```
 
 ### CREOSON: where to get it and install
 
@@ -135,21 +126,23 @@ CREOSON is a small **JSON server** between this app and **Creo Parametric**. It 
 
 #### Download
 
-| Source | URL |
-|--------|-----|
-| **Releases (recommended)** | [github.com/SimplifiedLogic/creoson/releases](https://github.com/SimplifiedLogic/creoson/releases) |
-| **Source / docs** | [github.com/SimplifiedLogic/creoson](https://github.com/SimplifiedLogic/creoson) |
-| **API reference** | [creoson.com/functions.html](https://creoson.com/functions.html) |
 
-For most users, download **`CreosonServerWithSetup-*.zip`** (setup GUI, includes Java). Choose **32-bit** or **64-bit** to match your Creo install.
+| Source                     | URL                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Releases (recommended)** | [github.com/SimplifiedLogic/creoson/releases](https://github.com/SimplifiedLogic/creoson/releases) |
+| **Source / docs**          | [github.com/SimplifiedLogic/creoson](https://github.com/SimplifiedLogic/creoson)                   |
+| **API reference**          | [creoson.com/functions.html](https://creoson.com/functions.html)                                   |
+
+
+For most users, download `**CreosonServerWithSetup-*.zip`** (setup GUI, includes Java). Choose **32-bit** or **64-bit** to match your Creo install.
 
 #### Install CREOSON (pre-packaged)
 
 CREOSON is not a traditional installer—you unzip and run from a folder:
 
-1. Download **`CreosonServerWithSetup-*.zip`** from [Releases](https://github.com/SimplifiedLogic/creoson/releases).
+1. Download `**CreosonServerWithSetup-*.zip`** from [Releases](https://github.com/SimplifiedLogic/creoson/releases).
 2. Copy the ZIP to a permanent location (e.g. `C:\Tools\creoson\`) and **extract** it.
-3. Run **`CreosonSetup.exe`**.
+3. Run `**CreosonSetup.exe`**.
 4. Set **Creo installation directory** (folder containing `parametric.exe`).
 5. Set **Port** (often **9056**—use the same value in this app’s **Port** field).
 6. Click **Start CREOSON** and leave it running while you extract parameters.
@@ -161,10 +154,12 @@ Allow the CREOSON port through Windows firewall on localhost if prompted.
 
 Behind the GUI, requests include `connection : connect`, `creo : cd`, `file : open`, `parameter : list`, `file : erase`, and `connection : disconnect` (via the [creopyson](https://github.com/Zepmanbc/creopyson) library). You do not send that JSON yourself.
 
-| Component | Role |
-|-----------|------|
-| **CREOSON** | Third-party server from Simplified Logic / GitHub releases. |
+
+| Component        | Role                                                              |
+| ---------------- | ----------------------------------------------------------------- |
+| **CREOSON**      | Third-party server from Simplified Logic / GitHub releases.       |
 | **This project** | Desktop UI and batch logic; Python deps: `creopyson`, `requests`. |
+
 
 ## References
 
