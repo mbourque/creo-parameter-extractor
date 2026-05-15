@@ -1,0 +1,18 @@
+# Local / machine-specific
+prt_parameter_extractor_settings.json
+models/
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+
+# PyInstaller
+build/
+CreoPRTParameterExtractor.spec
+
+# Editor / workspace
+Creo Parameter Extractor.code-workspace
+
+# Developer-only build script
+build_pyinstaller.bat

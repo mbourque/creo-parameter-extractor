@@ -1,0 +1,2 @@
+creopyson>=0.7.8
+requests>=2.28.0
