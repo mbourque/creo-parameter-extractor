@@ -27,7 +27,7 @@ You do **not** open each part by hand or copy parameters from the Creo UI. You d
 
 1. Start **Creo Parametric** and wait until it is fully loaded (no blocking dialogs).
 2. Start **CREOSON** and confirm it is listening on the port you entered.
-3. Run this app (`python prt_parameter_extractor.py` from the project folder).
+3. Run this app — either double-click **`CreoPRTParameterExtractor.exe`** in the project folder, or from a terminal run `python prt_parameter_extractor.py` (Python install required for the latter; see **Installation and setup** below).
 4. Set **Models folder** and **Output file**.
 5. Click **Extract parameters**.
 6. Watch the **Log** area for progress. When finished, a dialog confirms success or lists errors.
@@ -115,7 +115,15 @@ Starting only the CREOSON Java server without a live Creo session will cause con
    python -m pip install -r requirements.txt
    ```
 
-4. Run the application:
+4. Run the application (pick one):
+
+   **Executable** (no Python needed on that PC):
+
+   ```bat
+   CreoPRTParameterExtractor.exe
+   ```
+
+   **From source** (after step 3 above):
 
    ```bat
    python prt_parameter_extractor.py
