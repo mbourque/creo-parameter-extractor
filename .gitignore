@@ -9,7 +9,7 @@ __pycache__/
 
 # PyInstaller
 build/
-CreoPRTParameterExtractor.spec
+CreoParameterExtractor.spec
 
 # Editor / workspace
 Creo Parameter Extractor.code-workspace
