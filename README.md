@@ -1,4 +1,4 @@
-# Creo PRT Parameter Extractor
+# Creo Parameter Extractor
 
 ## What this app does
 
