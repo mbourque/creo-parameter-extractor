@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -40,7 +41,42 @@ def _app_dir() -> Path:
 
 
 _APP_DIR = _app_dir()
-SETTINGS_PATH = _APP_DIR / "prt_parameter_extractor_settings.json"
+_SETTINGS_FILENAME = "prt_parameter_extractor_settings.json"
+
+
+def _settings_file_candidates() -> list[Path]:
+    """Install-dir settings first, then a per-user folder if the install dir is not writable."""
+    primary = _APP_DIR / _SETTINGS_FILENAME
+    if sys.platform == "win32":
+        user_dir = Path(os.environ.get("APPDATA", Path.home())) / "CreoParameterExtractor"
+    else:
+        user_dir = Path.home() / ".config" / "creo_parameter_extractor"
+    return [primary, user_dir / _SETTINGS_FILENAME]
+
+
+def _can_write_settings_dir(path: Path) -> bool:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        probe = path.parent / ".write_probe"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def _resolve_settings_path() -> Path:
+    candidates = _settings_file_candidates()
+    for path in candidates:
+        if path.exists():
+            return path
+    for path in candidates:
+        if _can_write_settings_dir(path):
+            return path
+    return candidates[0]
+
+
+SETTINGS_PATH = _resolve_settings_path()
 
 
 def _settings_defaults() -> dict[str, object]:
@@ -72,22 +108,34 @@ def _normalize_settings(raw: dict | None) -> dict[str, object]:
 
 
 def load_ui_settings(path: Path) -> dict[str, object]:
-    """Load UI settings from JSON. Create file with defaults if missing."""
+    """Load UI settings from JSON. Create file with defaults if missing and writable."""
+    defaults = dict(_settings_defaults())
     if not path.exists():
-        data = _settings_defaults()
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        return dict(data)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(defaults, indent=2) + "\n", encoding="utf-8")
+        except OSError as ex:
+            lg.warning("Could not create settings file at %s: %s", path, ex)
+        return defaults
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return dict(_settings_defaults())
+    except (OSError, json.JSONDecodeError) as ex:
+        lg.warning("Could not read settings from %s: %s", path, ex)
+        return defaults
     if not isinstance(raw, dict):
-        return dict(_settings_defaults())
+        return defaults
     return _normalize_settings(raw)
 
 
-def save_ui_settings(path: Path, data: dict[str, object]) -> None:
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+def save_ui_settings(path: Path, data: dict[str, object]) -> bool:
+    """Persist settings; return False if the path could not be written."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return True
+    except OSError as ex:
+        lg.warning("Could not save settings to %s: %s", path, ex)
+        return False
 
 
 # HTTP timeouts: "light" requests vs heavy Creo work (open/regen).
@@ -518,14 +566,11 @@ class App(tk.Tk):
             "creoson_port": pi,
         }
 
-    def _save_settings(self) -> None:
-        save_ui_settings(SETTINGS_PATH, self._gather_settings())
+    def _save_settings(self) -> bool:
+        return save_ui_settings(SETTINGS_PATH, self._gather_settings())
 
     def _on_close(self) -> None:
-        try:
-            self._save_settings()
-        except OSError:
-            pass
+        self._save_settings()
         self.destroy()
 
     def _browse_folder(self) -> None:
