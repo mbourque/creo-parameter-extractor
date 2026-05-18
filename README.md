@@ -2,9 +2,9 @@
 
 ## What this app does
 
-This is a small **Windows desktop tool** that reads **Creo Parametric part parameters** from many models in one go and writes them to a **single text report**.
+This is a small **Windows desktop tool** that reads **Creo Parametric part parameters** from many models in one go and writes them to a **single HTML report**.
 
-You choose a folder of `.prt` files (including numbered backups like `part.prt.7`). The app connects to **CREOSON**, which in turn controls your **already-running** Creo session. For each part it opens the model in Creo (in the background), asks Creo for **all parameter names and values** (for example Part Number, Description, Manufacturer), then writes one section per file to your output path.
+You choose a folder of `.prt` files (including numbered backups like `part.prt.7`). The app connects to **CREOSON**, which in turn controls your **already-running** Creo session. For each part it opens the model in Creo (in the background), reads the parameters you asked for (or **all** parameters if you leave the list blank), then writes one **self-contained** `.html` file you can open in a browser.
 
 You do **not** open each part by hand or copy parameters from the Creo UI. You do **not** need to write JSON or code to use the GUI—only to run Creo, run CREOSON, pick folder and output file, and click **Extract parameters**.
 
@@ -16,21 +16,22 @@ You do **not** open each part by hand or copy parameters from the Creo UI. You d
 
 ### Fields
 
-| Field             | Purpose                                                                                                                     |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Models folder** | Directory containing your `.prt` files (and/or numbered backups like `part.prt.7`). Use **Browse…** to pick a folder.       |
-| **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine. |
-| **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                               |
-| **Output file**   | Path for the text report (e.g. `C:\reports\parameters.txt`). Use **Browse…** to choose.                                     |
+| Field             | Purpose                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Models folder** | Directory containing your `.prt` files (and/or numbered backups like `part.prt.7`). Use **Browse…** to pick a folder.                     |
+| **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine.               |
+| **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                                             |
+| **Parameters**    | Comma-separated parameter names to extract (e.g. `DESCRIPTION, MATERIAL, REV`). Spaces after commas are ignored. Matching is **case-insensitive**. **Leave blank** to include **every** parameter found on any processed model (columns are the union of names across parts). |
+| **Output file**   | Path for the HTML report (e.g. `C:\reports\parameters.html`). Use **Browse…** to choose. If you omit `.html`, it is added when you run. |
 
 ### Run extraction
 
 1. Start **Creo Parametric** and wait until it is fully loaded (no blocking dialogs).
 2. Start **CREOSON** and confirm it is listening on the port you entered.
 3. Run this app — either double-click `CreoParameterExtractor.exe` in the project folder, or from a terminal run `python prt_parameter_extractor.py` (Python install required for the latter; see **Installation and setup** below).
-4. Set **Models folder** and **Output file**.
+4. Set **Models folder**, **Parameters** (or leave blank for all), and **Output file**.
 5. Click **Extract parameters**.
-6. Watch the **Log** area for progress. When finished, a dialog confirms success or lists errors.
+6. Watch the **Log** area for progress. When finished, a dialog shows the saved path and offers **Open report** (opens the HTML in your default browser).
 
 ### Typical workflow
 
@@ -49,29 +50,38 @@ For each logical part name in the models folder:
 - If **`name.prt`** exists, that file is used.
 - Otherwise the **highest numbered** backup is used (e.g. `name.prt.10` over `name.prt.9`).
 
-Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are opened by copying a temporary `*.prt` **in the same folder** (Creo cannot open `.prt.N` by name through CREOSON). The report still labels the section with the **original disk filename**.
+Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are opened by copying a temporary `*.prt` **in the same folder** (Creo cannot open `.prt.N` by name through CREOSON). The report **Part name** column still shows the **original disk filename**.
 
 Models are opened in **non-display** mode for stable batch automation (no on-screen flash per part).
 
-## Output file format
+## HTML report
 
-Each model gets a header block, then all parameters (sorted by name):
+The output is one **self-contained** `.html` file: styles and scripts are embedded (no separate `.css` or `.js` files). You can copy or email the file; search and sort work offline.
 
-```text
-========================================================================
-MODEL FILE (disk): ec-j1000-0011.prt.7
-Creo session name: ec-j1000-0011.__cextmp_a1b2c3d4.prt
-========================================================================
+### Table layout
 
-Part Number: EC-J1000-0011
-Description: 0.635mm ERM6 EDGE RATE 2X30
-Manufacturer: Samtec
-Manufacturer_PN: ERM6-30-01.5-L-DV-A-K
-```
+| Column        | Content                                                                 |
+| ------------- | ----------------------------------------------------------------------- |
+| **Part name** | Disk filename as a link (`file:///…`) so you can **drag the link into Creo** to open that model (paths must still exist where you open the report). |
+| *Parameter columns* | One column per requested name, in the order you listed them. If **Parameters** was blank, one column per distinct parameter name found across all successful parts (union, in Creo list order). |
 
-Multiple models in one folder are written to the **same output file**, with sections separated by a line of `=` characters.
+The page title is **Creo Parameter Extractor Report**. Failed parts appear as highlighted rows; a summary **Errors** list appears at the bottom when needed.
 
-If some files fail, the report still contains successful sections and an **Errors** section at the end.
+### In the browser
+
+- **Search** — filter rows by text; choose **All fields** or a single column. Click **Search** or press Enter.
+- **Sort** — click a column header to sort ascending; click again for descending. ▲ / ▼ shows the active column.
+- **Field dropdown** — your last choice is remembered in the browser (`localStorage`) for the next report you open in that browser.
+
+### Parameters list (recap)
+
+- **Named list:** `PART_NO, DESCRIPTION, MATERIAL` — only those columns appear; missing values are empty cells.
+- **Blank:** all parameters from each model; column set is the union of every name seen on any successful part.
+- Names are matched **case-insensitively** (Creo treats parameter names that way).
+
+### Settings file
+
+UI choices are saved to `prt_parameter_extractor_settings.json` (including `parameter_names` and paths). The file is created beside the app or under `%APPDATA%\CreoParameterExtractor\` if the install folder is not writable.
 
 ## Troubleshooting
 
