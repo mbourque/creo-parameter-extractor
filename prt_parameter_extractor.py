@@ -11,9 +11,11 @@ Version: 1.0.0
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
+import webbrowser
 import re
 import secrets
 import shutil
@@ -82,6 +84,7 @@ SETTINGS_PATH = _resolve_settings_path()
 def _settings_defaults() -> dict[str, object]:
     return {
         "models_folder": "",
+        "parameter_names": "",
         "output_file": "",
         "creoson_host": "localhost",
         "creoson_port": 9056,
@@ -93,7 +96,7 @@ def _normalize_settings(raw: dict | None) -> dict[str, object]:
     d = _settings_defaults()
     if not raw:
         return d
-    for key in ("models_folder", "output_file", "creoson_host"):
+    for key in ("models_folder", "parameter_names", "output_file", "creoson_host"):
         v = raw.get(key)
         if isinstance(v, str):
             d[key] = v
@@ -217,30 +220,189 @@ def iter_latest_prt_files(folder: Path) -> list[Path]:
     return chosen
 
 
-def format_part_block(
-    disk_name: str,
-    paramlist: list[dict],
+def parse_parameter_names(text: str) -> list[str]:
+    """Split comma-separated parameter names; spaces after commas are ignored."""
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def parameter_values_in_order(
+    paramlist: list[dict], names: list[str]
+) -> list[str]:
+    """Lookup by parameter name (case-insensitive; Creo treats names as case-insensitive)."""
+    by_name: dict[str, str] = {}
+    for entry in paramlist:
+        pname = entry.get("name")
+        if pname:
+            by_name[str(pname).casefold()] = _format_param_value(entry)
+    return [by_name.get(name.casefold(), "") for name in names]
+
+
+def ordered_parameter_columns(part_plists: list[list[dict]]) -> list[str]:
+    """
+    Union of parameter names across parts, in Creo list order (first occurrence wins).
+
+    Case-insensitive deduplication; spelling comes from the first model that defines the name.
+    """
+    seen: set[str] = set()
+    columns: list[str] = []
+    for plist in part_plists:
+        for entry in plist:
+            pname = entry.get("name")
+            if not pname:
+                continue
+            key = str(pname).casefold()
+            if key not in seen:
+                seen.add(key)
+                columns.append(str(pname))
+    return columns
+
+
+def build_html_report(
     *,
-    creo_session_name: str | None = None,
+    title: str,
+    parameter_names: list[str],
+    rows: list[dict[str, object]],
+    errors: list[str],
 ) -> str:
-    """
-    One model section for the report: banner with full disk filename (incl. .prt.N),
-    then ``Name: value`` for each parameter.
-    """
-    bar = "=" * 72
-    lines: list[str] = [
-        bar,
-        f"MODEL FILE (disk): {disk_name}",
+    """Build a single HTML page with a title, search bar, and parameter table."""
+    headers = ["Part name", *parameter_names]
+    field_options = ['<option value="all">All fields</option>']
+    for i, h in enumerate(headers):
+        field_options.append(
+            f'<option value="{i}">{html.escape(h)}</option>'
+        )
+    parts: list[str] = [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="utf-8">',
+        f"<title>{html.escape(title)}</title>",
+        "<style>",
+        "body { font-family: Segoe UI, Arial, sans-serif; margin: 1.5rem; }",
+        "h1 { font-size: 1.35rem; margin-bottom: 1rem; }",
+        ".search-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; "
+        "margin-bottom: 1rem; padding: 10px 12px; background: #f0f4f8; border: 1px solid #ccc; "
+        "border-radius: 4px; }",
+        ".search-bar label { font-weight: 600; }",
+        ".search-bar input[type=search] { min-width: 14rem; padding: 4px 8px; }",
+        ".search-bar select { padding: 4px 8px; }",
+        ".search-bar button { padding: 5px 14px; cursor: pointer; }",
+        "#searchStatus { color: #444; font-size: 0.9rem; }",
+        "table { border-collapse: collapse; width: 100%; }",
+        "th, td { border: 1px solid #bbb; padding: 6px 10px; text-align: left; }",
+        "th { background: #e8e8e8; }",
+        "tbody tr:nth-child(even) { background: #f8f8f8; }",
+        "tbody tr.hidden { display: none; }",
+        "tr.error td { background: #fff0f0; color: #800; }",
+        "a { color: #0645ad; }",
+        ".errors { margin-top: 1.5rem; color: #800; }",
+        "</style>",
+        "</head>",
+        "<body>",
+        f"<h1>{html.escape(title)}</h1>",
+        '<div class="search-bar">',
+        '<label for="searchInput">Search</label>',
+        '<input type="search" id="searchInput" placeholder="Text to find…" autocomplete="off">',
+        '<label for="searchField">Field</label>',
+        f'<select id="searchField">{"".join(field_options)}</select>',
+        '<button type="button" id="searchBtn">Search</button>',
+        '<span id="searchStatus" aria-live="polite"></span>',
+        "</div>",
+        '<table id="reportTable">',
+        "<thead><tr>",
     ]
-    if creo_session_name and creo_session_name != disk_name:
-        lines.append(f"Creo session name: {creo_session_name}")
-    lines.extend([bar, ""])
-    for p in sorted(paramlist, key=lambda x: str(x.get("name", "")).lower()):
-        name = p.get("name")
-        if not name:
+    for h in headers:
+        parts.append(f"<th>{html.escape(h)}</th>")
+    parts.append("</tr></thead><tbody>")
+    for row in rows:
+        err = row.get("error")
+        part_name = str(row.get("part_name", ""))
+        file_path = row["file_path"]
+        assert isinstance(file_path, Path)
+        uri = file_path.resolve().as_uri()
+        link = (
+            f'<a href="{html.escape(uri, quote=True)}">'
+            f"{html.escape(part_name)}</a>"
+        )
+        if err:
+            colspan = max(1, len(parameter_names))
+            parts.append(
+                f'<tr class="error"><td>{link}</td>'
+                f'<td colspan="{colspan}">{html.escape(str(err))}</td></tr>'
+            )
             continue
-        lines.append(f"{name}: {_format_param_value(p)}")
-    return "\n".join(lines) + "\n"
+        values = row.get("values")
+        if not isinstance(values, list):
+            values = []
+        parts.append("<tr>")
+        parts.append(f"<td>{link}</td>")
+        for val in values:
+            parts.append(f"<td>{html.escape(str(val))}</td>")
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    if errors:
+        parts.append('<div class="errors"><p><strong>Errors</strong></p><ul>')
+        for msg in errors:
+            parts.append(f"<li>{html.escape(msg)}</li>")
+        parts.append("</ul></div>")
+    parts.extend(
+        [
+            "<script>",
+            "(function () {",
+            "  const STORAGE_KEY = 'creoParamExtractor.searchField';",
+            "  const fieldSelect = document.getElementById('searchField');",
+            "  const searchInput = document.getElementById('searchInput');",
+            "  const searchBtn = document.getElementById('searchBtn');",
+            "  const status = document.getElementById('searchStatus');",
+            "  const tbody = document.querySelector('#reportTable tbody');",
+            "  const saved = localStorage.getItem(STORAGE_KEY);",
+            "  if (saved && Array.from(fieldSelect.options).some(function (o) {",
+            "    return o.value === saved;",
+            "  })) {",
+            "    fieldSelect.value = saved;",
+            "  }",
+            "  fieldSelect.addEventListener('change', function () {",
+            "    localStorage.setItem(STORAGE_KEY, fieldSelect.value);",
+            "  });",
+            "  function cellText(td) {",
+            "    return (td.textContent || '').trim();",
+            "  }",
+            "  function runSearch() {",
+            "    const q = searchInput.value.trim().toLowerCase();",
+            "    const field = fieldSelect.value;",
+            "    let visible = 0;",
+            "    let total = 0;",
+            "    tbody.querySelectorAll('tr').forEach(function (tr) {",
+            "      total += 1;",
+            "      const cells = tr.querySelectorAll('td');",
+            "      let match = true;",
+            "      if (q) {",
+            "        if (field === 'all') {",
+            "          match = Array.from(cells).some(function (td) {",
+            "            return cellText(td).toLowerCase().indexOf(q) !== -1;",
+            "          });",
+            "        } else {",
+            "          const idx = parseInt(field, 10);",
+            "          const td = cells[idx];",
+            "          match = td && cellText(td).toLowerCase().indexOf(q) !== -1;",
+            "        }",
+            "      }",
+            "      tr.classList.toggle('hidden', !match);",
+            "      if (match) visible += 1;",
+            "    });",
+            "    status.textContent = q ? visible + ' of ' + total + ' row(s)' : '';",
+            "  }",
+            "  searchBtn.addEventListener('click', runSearch);",
+            "  searchInput.addEventListener('keydown', function (e) {",
+            "    if (e.key === 'Enter') runSearch();",
+            "  });",
+            "})();",
+            "</script>",
+            "</body>",
+            "</html>",
+        ]
+    )
+    return "\n".join(parts)
 
 
 def _check_tcp(host: str, port: int, *, timeout: float = 5.0) -> None:
@@ -347,29 +509,28 @@ def extract_all(
     host: str,
     port: int,
     *,
+    parameter_names: list[str],
+    report_title: str = "Creo Parameter Extractor Report",
     progress: Callable[[str], None] | None = None,
 ) -> tuple[str, list[str]]:
     """
     Connect to CREOSON, open each latest .prt, list parameters, erase from session.
 
-    Creo Parametric must be running; CREOSON drives it through J-Link.
-
-    Models are opened with ``display=False`` (non-display mode) for stable batch
-    automation; showing each model in a window is not supported reliably here.
-
-    Numbered disk backups (``*.prt.N``) are copied next to the original as a
-    uniquely named ``*.prt`` before open (Creo cannot open ``.prt.N`` by name,
-    and a copy under %TEMP% breaks references to other files in the folder).
+    If ``parameter_names`` is empty, every parameter found on any processed model is
+    included (union of names, columns in Creo list order).
 
     Returns:
-        (full_report_text, list of error lines)
+        (html_report, list of error lines)
     """
     def log(msg: str) -> None:
         if progress:
             progress(msg)
 
     errors: list[str] = []
-    parts: list[str] = []
+    pending: list[dict[str, object]] = []
+    extract_all_params = not parameter_names
+    if extract_all_params:
+        log("Parameters blank — will include all parameters from each model.")
     log(f"Checking TCP {host}:{port} …")
     _check_tcp(host, port)
     log(
@@ -431,17 +592,26 @@ def extract_all(
                 if not plist:
                     plist = []
                 log(f"  Got {len(plist)} parameter(s). Erasing from session …")
-                parts.append(
-                    format_part_block(
-                        disk_name,
-                        plist,
-                        creo_session_name=in_session,
-                    )
+                pending.append(
+                    {
+                        "part_name": disk_name,
+                        "file_path": disk_path.resolve(),
+                        "plist": plist,
+                        "error": None,
+                    }
                 )
                 client.file_erase(file_=in_session)
             except Exception as ex:  # noqa: BLE001 — surface any Creo/Creoson failure
                 errors.append(f"{disk_name}: {ex}")
                 log(f"  Error: {ex}")
+                pending.append(
+                    {
+                        "part_name": disk_name,
+                        "file_path": disk_path.resolve(),
+                        "plist": None,
+                        "error": str(ex),
+                    }
+                )
                 try:
                     if client.file_open_errors(file_=open_name):
                         log(
@@ -470,10 +640,60 @@ def extract_all(
         except Exception:
             pass
 
-    sep = ("\n" + ("=" * 72) + "\n\n") if len(parts) > 1 else "\n\n"
-    report = sep.join(parts) if parts else "(no .prt files found in folder)\n"
-    if errors:
-        report += "\n--- Errors ---\n" + "\n".join(errors) + "\n"
+    if parameter_names:
+        column_names = parameter_names
+    elif pending:
+        ok_plists = [
+            p["plist"]
+            for p in pending
+            if p.get("plist") is not None and not p.get("error")
+        ]
+        column_names = ordered_parameter_columns(
+            [pl for pl in ok_plists if isinstance(pl, list)]
+        )
+        if extract_all_params and column_names:
+            log(f"Report columns: {len(column_names)} parameter(s) (union across models).")
+    else:
+        column_names = []
+
+    table_rows: list[dict[str, object]] = []
+    for p in pending:
+        err = p.get("error")
+        if err:
+            table_rows.append(
+                {
+                    "part_name": p["part_name"],
+                    "file_path": p["file_path"],
+                    "values": [""] * len(column_names),
+                    "error": str(err),
+                }
+            )
+            continue
+        plist = p.get("plist")
+        if not isinstance(plist, list):
+            plist = []
+        table_rows.append(
+            {
+                "part_name": p["part_name"],
+                "file_path": p["file_path"],
+                "values": parameter_values_in_order(plist, column_names),
+            }
+        )
+
+    if not table_rows and not errors:
+        report = build_html_report(
+            title=report_title,
+            parameter_names=column_names,
+            rows=[],
+            errors=["No .prt files found in folder."],
+        )
+    else:
+        report = build_html_report(
+            title=report_title,
+            parameter_names=column_names,
+            rows=table_rows,
+            errors=errors,
+        )
     return report, errors
 
 
@@ -504,6 +724,24 @@ class App(tk.Tk):
         tk.Label(row2, text="Port").pack(side=tk.LEFT)
         self.port_var = tk.StringVar()
         tk.Entry(row2, textvariable=self.port_var, width=8).pack(side=tk.LEFT, padx=(4, 0))
+
+        row_params = tk.Frame(frm)
+        row_params.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(row_params, text="Parameters", width=14, anchor="w").pack(
+            side=tk.LEFT
+        )
+        self.params_var = tk.StringVar()
+        tk.Entry(row_params, textvariable=self.params_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+        tk.Label(
+            frm,
+            text="Leave blank to include all parameters. Otherwise list names separated by "
+            "commas (spaces after commas are ignored; matching is case-insensitive).",
+            wraplength=780,
+            justify=tk.LEFT,
+            fg="#444",
+        ).pack(anchor="w", pady=(0, 4))
 
         row3 = tk.Frame(frm)
         row3.pack(fill=tk.X, pady=(0, 4))
@@ -541,6 +779,7 @@ class App(tk.Tk):
     def _apply_loaded_settings(self) -> None:
         s = load_ui_settings(SETTINGS_PATH)
         self.folder_var.set(str(s.get("models_folder", "")))
+        self.params_var.set(str(s.get("parameter_names", "")))
         self.out_var.set(str(s.get("output_file", "")))
         self.host_var.set(str(s.get("creoson_host", "localhost")))
         try:
@@ -561,6 +800,7 @@ class App(tk.Tk):
             pi = 9056
         return {
             "models_folder": self.folder_var.get().strip(),
+            "parameter_names": self.params_var.get().strip(),
             "output_file": self.out_var.get().strip(),
             "creoson_host": self.host_var.get().strip() or "localhost",
             "creoson_port": pi,
@@ -580,9 +820,9 @@ class App(tk.Tk):
 
     def _browse_out(self) -> None:
         p = filedialog.asksaveasfilename(
-            title="Save parameter report",
-            defaultextension=".txt",
-            filetypes=[("Text", "*.txt"), ("All files", "*.*")],
+            title="Save HTML parameter report",
+            defaultextension=".html",
+            filetypes=[("HTML", "*.html"), ("All files", "*.*")],
         )
         if p:
             self.out_var.set(p)
@@ -596,16 +836,80 @@ class App(tk.Tk):
         """Thread-safe: schedule log append on the Tk main thread."""
         self.after(0, lambda m=msg: self._append_log(m))
 
+    def _open_html_report(self, path: Path) -> None:
+        resolved = path.resolve()
+        try:
+            if sys.platform == "win32":
+                os.startfile(resolved)  # noqa: S606 — default app for .html
+            else:
+                webbrowser.open(resolved.as_uri())
+        except OSError as ex:
+            messagebox.showerror("Open report", f"Could not open report:\n{ex}")
+
+    def _show_completion_dialog(self, outp: Path, errs: list[str]) -> None:
+        resolved = outp.resolve()
+        dlg = tk.Toplevel(self)
+        dlg.title("Finished with errors" if errs else "Done")
+        dlg.transient(self)
+        dlg.resizable(False, False)
+
+        body = tk.Frame(dlg, padx=16, pady=12)
+        body.pack()
+
+        if errs:
+            tk.Label(
+                body,
+                text=f"Report saved with {len(errs)} error(s).",
+                justify=tk.LEFT,
+            ).pack(anchor="w")
+            err_preview = "\n".join(errs[:8])
+            if len(errs) > 8:
+                err_preview += f"\n… and {len(errs) - 8} more (see log)."
+            tk.Label(
+                body,
+                text=err_preview,
+                justify=tk.LEFT,
+                fg="#800",
+                wraplength=420,
+            ).pack(anchor="w", pady=(4, 8))
+        else:
+            tk.Label(body, text="Report saved successfully.", justify=tk.LEFT).pack(
+                anchor="w"
+            )
+
+        tk.Label(
+            body,
+            text=str(resolved),
+            justify=tk.LEFT,
+            wraplength=420,
+            fg="#333",
+        ).pack(anchor="w", pady=(0, 12))
+
+        btn_row = tk.Frame(body)
+        btn_row.pack(anchor="e")
+        tk.Button(
+            btn_row,
+            text="Open report",
+            default=tk.ACTIVE,
+            command=lambda: (self._open_html_report(outp), dlg.destroy()),
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(btn_row, text="Close", command=dlg.destroy).pack(side=tk.LEFT)
+
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+        dlg.grab_set()
+        dlg.focus_force()
+        dlg.update_idletasks()
+        dlg.geometry(f"+{self.winfo_rootx() + 40}+{self.winfo_rooty() + 40}")
+
     def _run_done(self, outp: Path, errs: list[str]) -> None:
         """UI follow-up after a successful extract (main thread only)."""
         self.run_btn.config(state=tk.NORMAL)
         self._append_log(f"Wrote {outp.resolve()}")
         if errs:
             self._append_log(f"Completed with {len(errs)} error(s).")
-            messagebox.showwarning("Finished with errors", "\n".join(errs[:12]))
         else:
             self._append_log("Done.")
-            messagebox.showinfo("Done", f"Report saved to:\n{outp.resolve()}")
+        self._show_completion_dialog(outp, errs)
 
     def _run_fail(self, err: BaseException) -> None:
         """UI follow-up after extract or save failed (main thread only)."""
@@ -618,10 +922,14 @@ class App(tk.Tk):
         if not folder.is_dir():
             messagebox.showerror("Invalid folder", "Choose a valid folder with Creo models.")
             return
+        param_names = parse_parameter_names(self.params_var.get())
         out_path = self.out_var.get().strip()
         if not out_path:
-            messagebox.showerror("Output file", "Choose where to save the report.")
+            messagebox.showerror("Output file", "Choose where to save the HTML report.")
             return
+        if not out_path.lower().endswith(".html"):
+            out_path = str(Path(out_path).with_suffix(".html"))
+            self.out_var.set(out_path)
         try:
             port = int(self.port_var.get().strip())
         except ValueError:
@@ -639,6 +947,7 @@ class App(tk.Tk):
                     folder,
                     host,
                     port,
+                    parameter_names=param_names,
                     progress=self._log_from_worker,
                 )
                 outp = Path(out_path)
