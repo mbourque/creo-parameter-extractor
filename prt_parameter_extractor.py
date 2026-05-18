@@ -88,6 +88,7 @@ def _settings_defaults() -> dict[str, object]:
         "output_file": "",
         "creoson_host": "localhost",
         "creoson_port": 9056,
+        "recursive_search": False,
     }
 
 
@@ -107,6 +108,9 @@ def _normalize_settings(raw: dict | None) -> dict[str, object]:
         pi = int(p.strip())
         if 1 <= pi <= 65535:
             d["creoson_port"] = pi
+    r = raw.get("recursive_search")
+    if isinstance(r, bool):
+        d["recursive_search"] = r
     return d
 
 
@@ -190,23 +194,55 @@ def _format_param_value(entry: dict) -> str:
     return str(val)
 
 
-def iter_latest_prt_files(folder: Path) -> list[Path]:
+def _prt_group_key(folder: Path, path: Path, *, recursive: bool) -> str:
+    """Unique key per folder + model stem; subfolders are separate when recursive."""
+    m = _PRT_NAME.match(path.name)
+    if not m:
+        return path.name
+    base = m.group("base")
+    if not recursive:
+        return base
+    try:
+        rel_parent = path.parent.relative_to(folder)
+    except ValueError:
+        return base
+    if rel_parent.parts:
+        return (rel_parent / base).as_posix()
+    return base
+
+
+def part_display_name(models_root: Path, disk_path: Path, *, recursive: bool) -> str:
+    """Report label: filename in the root folder, or relative path when recursive."""
+    if not recursive:
+        return disk_path.name
+    try:
+        return str(disk_path.relative_to(models_root))
+    except ValueError:
+        return disk_path.name
+
+
+def iter_latest_prt_files(folder: Path, *, recursive: bool = False) -> list[Path]:
     """
     For each logical model name (*.prt or *.prt.N), pick one file to open:
     - If `name.prt` exists, it is treated as the current revision (wins over numbered).
     - Otherwise choose the path whose numeric suffix is largest (.10 over .9).
+
+    When ``recursive`` is True, scans all subfolders; the same filename in different
+    folders is treated as separate models.
     """
     groups: dict[str, list[tuple[int, Path]]] = {}
-    for path in folder.iterdir():
-        if not path.is_file():
-            continue
+    if recursive:
+        candidates = (p for p in folder.rglob("*") if p.is_file())
+    else:
+        candidates = (p for p in folder.iterdir() if p.is_file())
+    for path in candidates:
         m = _PRT_NAME.match(path.name)
         if not m:
             continue
-        base = m.group("base")
+        key = _prt_group_key(folder, path, recursive=recursive)
         ver_s = m.group("ver")
         rank = int(ver_s) if ver_s is not None else 10**9
-        groups.setdefault(base, []).append((rank, path))
+        groups.setdefault(key, []).append((rank, path))
 
     chosen: list[Path] = []
     for base in sorted(groups.keys(), key=str.lower):
@@ -567,6 +603,7 @@ def extract_all(
     *,
     parameter_names: list[str],
     report_title: str = "Creo Parameter Extractor Report",
+    recursive: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[str, list[str]]:
     """
@@ -610,12 +647,15 @@ def extract_all(
         wd = str(folder.resolve())
         log(f"Setting Creo working directory to:\n  {wd}")
         client.creo_cd(wd)
-        prt_paths = iter_latest_prt_files(folder)
+        prt_paths = iter_latest_prt_files(folder, recursive=recursive)
+        if recursive:
+            log("Recursive search enabled — including .prt files in subfolders.")
         log(f"Found {len(prt_paths)} .prt file(s) to process (after version filter).")
         for disk_path in prt_paths:
             disk_name = disk_path.name
+            label = part_display_name(folder, disk_path, recursive=recursive)
             staged_path: Path | None = None
-            open_dir = wd
+            open_dir = str(disk_path.parent.resolve())
             open_name = disk_name
             in_session = open_name
             try:
@@ -624,11 +664,11 @@ def extract_all(
                         disk_path
                     )
                     log(
-                        f"Opening {disk_name} … "
+                        f"Opening {label} … "
                         f"(staged as {open_name} in same folder for references)"
                     )
                 else:
-                    log(f"Opening {disk_name} …")
+                    log(f"Opening {label} …")
 
                 opened = client.file_open(
                     open_name,
@@ -650,7 +690,7 @@ def extract_all(
                 log(f"  Got {len(plist)} parameter(s). Erasing from session …")
                 pending.append(
                     {
-                        "part_name": disk_name,
+                        "part_name": label,
                         "file_path": disk_path.resolve(),
                         "plist": plist,
                         "error": None,
@@ -658,11 +698,11 @@ def extract_all(
                 )
                 client.file_erase(file_=in_session)
             except Exception as ex:  # noqa: BLE001 — surface any Creo/Creoson failure
-                errors.append(f"{disk_name}: {ex}")
+                errors.append(f"{label}: {ex}")
                 log(f"  Error: {ex}")
                 pending.append(
                     {
-                        "part_name": disk_name,
+                        "part_name": label,
                         "file_path": disk_path.resolve(),
                         "plist": None,
                         "error": str(ex),
@@ -760,6 +800,17 @@ class App(tk.Tk):
         self.geometry("820x560")
         self.minsize(640, 420)
 
+        self.recursive_var = tk.BooleanVar(value=False)
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
+        options_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Options", menu=options_menu)
+        options_menu.add_checkbutton(
+            label="Recursively find files",
+            variable=self.recursive_var,
+            command=self._save_settings,
+        )
+
         frm = tk.Frame(self, padx=8, pady=8)
         frm.pack(fill=tk.BOTH, expand=True)
 
@@ -845,6 +896,7 @@ class App(tk.Tk):
         if not (1 <= p <= 65535):
             p = 9056
         self.port_var.set(str(p))
+        self.recursive_var.set(bool(s.get("recursive_search", False)))
 
     def _gather_settings(self) -> dict[str, object]:
         port_s = self.port_var.get().strip()
@@ -860,6 +912,7 @@ class App(tk.Tk):
             "output_file": self.out_var.get().strip(),
             "creoson_host": self.host_var.get().strip() or "localhost",
             "creoson_port": pi,
+            "recursive_search": bool(self.recursive_var.get()),
         }
 
     def _save_settings(self) -> bool:
@@ -1004,6 +1057,7 @@ class App(tk.Tk):
                     host,
                     port,
                     parameter_names=param_names,
+                    recursive=bool(self.recursive_var.get()),
                     progress=self._log_from_worker,
                 )
                 outp = Path(out_path)
