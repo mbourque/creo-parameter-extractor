@@ -2,6 +2,11 @@
 prt_parameter_extractor_settings.json
 models/
 
+# Generated HTML reports
+*.html
+*.htm
+*.txt
+
 # Python
 venv/
 __pycache__/
