@@ -4,7 +4,7 @@
 
 This is a small **Windows desktop tool** that reads **Creo Parametric part parameters** from many models in one go and writes them to a **single HTML report**.
 
-You choose a folder of `.prt` files (including numbered backups like `part.prt.7`). The app connects to **CREOSON**, which in turn controls your **already-running** Creo session. For each part it opens the model in Creo (in the background), reads the parameters you asked for (or **all** parameters if you leave the list blank), then writes one **self-contained** `.html` file you can open in a browser.
+You choose a folder of `.prt` files (including numbered models like `part.prt.7`). The app connects to **CREOSON**, which in turn controls your **already-running** Creo session. For each part it opens the model in Creo (in the background), reads the parameters you asked for (or **all** parameters if you leave the list blank), then writes one **self-contained** `.html` file you can open in a browser.
 
 You do **not** open each part by hand or copy parameters from the Creo UI. You do **not** need to write JSON or code to use the GUI—only to run Creo, run CREOSON, pick folder and output file, and click **Extract parameters**.
 
@@ -18,7 +18,7 @@ You do **not** open each part by hand or copy parameters from the Creo UI. You d
 
 | Field             | Purpose                                                                                                                                 |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Models folder** | Directory containing your `.prt` files (and/or numbered backups like `part.prt.7`). Use **Browse…** to pick a folder.                     |
+| **Models folder** | Directory containing your `.prt` files (and/or numbered models like `part.prt.7`). Use **Browse…** to pick a folder.                     |
 | **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine.               |
 | **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                                             |
 | **Parameters**    | Comma-separated parameter names to extract (e.g. `DESCRIPTION, MATERIAL, REV`). Spaces after commas are ignored. Matching is **case-insensitive**. **Leave blank** to include **every** parameter found on any processed model (columns are the union of names across parts). |
@@ -63,7 +63,7 @@ The log should show `Checking TCP localhost:9056 …` then `Connecting to CREOSO
 For each logical part name in a given folder:
 
 - If **`name.prt`** exists, that file is used.
-- Otherwise the **highest numbered** backup is used (e.g. `name.prt.10` over `name.prt.9`).
+- Otherwise the file with the **highest number** is used (e.g. `name.prt.10` over `name.prt.9`).
 
 With recursion enabled, `subasm\bracket.prt` and `hardware\bracket.prt` are **two separate** parts (grouped per folder + name).
 
@@ -71,10 +71,7 @@ Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are opened by
 
 ### Part name in the report
 
-| Mode        | **Part name** column shows                          |
-| ----------- | --------------------------------------------------- |
-| Non-recursive | Filename only (e.g. `bracket.prt.7`)              |
-| Recursive     | Path relative to the models folder (e.g. `subasm\bracket.prt`) |
+The **Part name** column always shows the filename without a version suffix (e.g. `bracket.prt`, not `bracket.prt.7`), whether or not recursive search is enabled. Dragging supplies a full absolute `file:///…` path with the plain `.prt` name so Creo opens the latest file on disk. Clicking does nothing. **Parameter values** in the row are read from the model file that was actually opened (e.g. `name.prt.7` when that is the file on disk).
 
 Models are opened in **non-display** mode for stable batch automation (no on-screen flash per part).
 
@@ -86,7 +83,7 @@ The output is one **self-contained** `.html` file: styles and scripts are embedd
 
 | Column        | Content                                                                 |
 | ------------- | ----------------------------------------------------------------------- |
-| **Part name** | Filename or relative path (when recursive search is on) as a link (`file:///…`) so you can **drag the link into Creo** to open that model (paths must still exist where you open the report). |
+| **Part name** | Part filename as a link (click does nothing). **Drag** the name into Creo to open the model; a tooltip on the link reminds you. Drag always uses a full absolute `file:///…` URI (`part.prt` when the model is `part.prt.N`). |
 | *Parameter columns* | One column per requested name, in the order you listed them. If **Parameters** was blank, one column per distinct parameter name found across all successful parts (union, in Creo list order). |
 
 The page title is **Creo Parameter Extractor Report**. Failed parts appear as highlighted rows; a summary **Errors** list appears at the bottom when needed.

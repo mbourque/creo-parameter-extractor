@@ -151,7 +151,7 @@ _DEFAULT_READ = 300.0
 # `connection: connect` should return quickly if Creo + J-Link are ready.
 _CONNECTION_READ = 60.0
 _PRT_NAME = re.compile(r"(?i)^(?P<base>.+)\.prt(?:\.(?P<ver>\d+))?$")
-# Disk backup like model.prt.7 — Creo/CREOSON "open" only accepts model.prt.
+# Numbered model on disk (e.g. model.prt.7) — Creo/CREOSON "open" only accepts model.prt.
 _VERSIONED_PRT_DISK = re.compile(r"(?i)^(?P<stem>.+)\.prt\.(?P<num>\d+)$")
 
 
@@ -166,11 +166,34 @@ def plain_prt_open_filename(versioned_disk_name: str) -> str:
     return f"{m.group('stem')}.prt"
 
 
+def prt_file_link_path(disk_path: Path) -> Path:
+    """
+    Path for file:// links in the HTML report.
+
+    ``mypart.prt.5`` → ``mypart.prt`` in the same folder so Creo opens the latest
+    file on disk (recursive and non-recursive).
+    """
+    plain = plain_prt_open_filename(disk_path.name)
+    if plain == disk_path.name:
+        return disk_path
+    return disk_path.parent / plain
+
+
+def file_uri_full_path(disk_path: Path) -> str:
+    """``file:///`` URI with a fully qualified absolute path (never relative)."""
+    return prt_file_link_path(disk_path).resolve().as_uri()
+
+
+def part_display_name(disk_path: Path) -> str:
+    """Report Part name label (filename only, no .prt.N suffix)."""
+    return plain_prt_open_filename(disk_path.name)
+
+
 def stage_versioned_prt_beside_original(disk_path: Path) -> tuple[str, Path]:
     """
     Copy ``*.prt.N`` next to the original as a uniquely named ``*.prt``.
 
-    Keeps the same directory as the backup so references to other models in
+    Keeps the same directory as the source file so references to other models in
     that folder still resolve (staging under %TEMP% breaks that).
     """
     plain = plain_prt_open_filename(disk_path.name)
@@ -211,20 +234,10 @@ def _prt_group_key(folder: Path, path: Path, *, recursive: bool) -> str:
     return base
 
 
-def part_display_name(models_root: Path, disk_path: Path, *, recursive: bool) -> str:
-    """Report label: filename in the root folder, or relative path when recursive."""
-    if not recursive:
-        return disk_path.name
-    try:
-        return str(disk_path.relative_to(models_root))
-    except ValueError:
-        return disk_path.name
-
-
 def iter_latest_prt_files(folder: Path, *, recursive: bool = False) -> list[Path]:
     """
     For each logical model name (*.prt or *.prt.N), pick one file to open:
-    - If `name.prt` exists, it is treated as the current revision (wins over numbered).
+    - If `name.prt` exists in the same folder, it is used instead of `name.prt.N`.
     - Otherwise choose the path whose numeric suffix is largest (.10 over .9).
 
     When ``recursive`` is True, scans all subfolders; the same filename in different
@@ -249,10 +262,10 @@ def iter_latest_prt_files(folder: Path, *, recursive: bool = False) -> list[Path
         entries = groups[base]
         plain = next((p for r, p in entries if r == 10**9), None)
         if plain is not None:
-            chosen.append(plain)
+            chosen.append(plain.resolve())
         else:
             entries.sort(key=lambda t: t[0], reverse=True)
-            chosen.append(entries[0][1])
+            chosen.append(entries[0][1].resolve())
     return chosen
 
 
@@ -291,6 +304,21 @@ def ordered_parameter_columns(part_plists: list[list[dict]]) -> list[str]:
                 seen.add(key)
                 columns.append(str(pname))
     return columns
+
+
+_PART_DRAG_TOOLTIP = "Drag this link into Creo to open the part. Click does nothing."
+
+
+def html_part_file_link(file_uri: str, part_name: str) -> str:
+    """Part name as link text; click disabled, drag supplies the file URI to Creo."""
+    esc_uri_attr = html.escape(file_uri, quote=True)
+    esc_label = html.escape(part_name)
+    esc_tip = html.escape(_PART_DRAG_TOOLTIP)
+    return (
+        f'<a href="javascript:void(0)" class="part-link" draggable="true" '
+        f'data-file-uri="{esc_uri_attr}" title="{esc_tip}" '
+        f'onclick="return false;">{esc_label}</a>'
+    )
 
 
 def build_html_report(
@@ -336,6 +364,8 @@ def build_html_report(
         "tbody tr.hidden { display: none; }",
         "tr.error td { background: #fff0f0; color: #800; }",
         "a { color: #0645ad; }",
+        "a.part-link { cursor: grab; }",
+        "a.part-link:active { cursor: grabbing; }",
         ".errors { margin-top: 1.5rem; color: #800; }",
         "</style>",
         "</head>",
@@ -361,18 +391,15 @@ def build_html_report(
     parts.append("</tr></thead><tbody>")
     for row in rows:
         err = row.get("error")
-        part_name = str(row.get("part_name", ""))
         file_path = row["file_path"]
         assert isinstance(file_path, Path)
-        uri = file_path.resolve().as_uri()
-        link = (
-            f'<a href="{html.escape(uri, quote=True)}">'
-            f"{html.escape(part_name)}</a>"
-        )
+        part_name = str(row.get("part_name", ""))
+        uri = file_uri_full_path(file_path)
+        link = html_part_file_link(uri, part_name)
         if err:
             colspan = max(1, len(parameter_names))
             parts.append(
-                f'<tr class="error"><td>{link}</td>'
+                f'<tr class="error"><td class="part-name">{link}</td>'
                 f'<td colspan="{colspan}">{html.escape(str(err))}</td></tr>'
             )
             continue
@@ -380,7 +407,7 @@ def build_html_report(
         if not isinstance(values, list):
             values = []
         parts.append("<tr>")
-        parts.append(f"<td>{link}</td>")
+        parts.append(f'<td class="part-name">{link}</td>')
         for val in values:
             parts.append(f"<td>{html.escape(str(val))}</td>")
         parts.append("</tr>")
@@ -487,6 +514,15 @@ def build_html_report(
             "  searchBtn.addEventListener('click', runSearch);",
             "  searchInput.addEventListener('keydown', function (e) {",
             "    if (e.key === 'Enter') runSearch();",
+            "  });",
+            "  document.querySelectorAll('a.part-link').forEach(function (a) {",
+            "    a.addEventListener('dragstart', function (e) {",
+            "      var url = a.getAttribute('data-file-uri');",
+            "      if (!url || !e.dataTransfer) return;",
+            "      e.dataTransfer.setData('text/uri-list', url);",
+            "      e.dataTransfer.setData('text/plain', url);",
+            "      e.dataTransfer.effectAllowed = 'copy';",
+            "    });",
             "  });",
             "})();",
             "</script>",
@@ -619,6 +655,7 @@ def extract_all(
         if progress:
             progress(msg)
 
+    folder = folder.resolve()
     errors: list[str] = []
     pending: list[dict[str, object]] = []
     extract_all_params = not parameter_names
@@ -653,7 +690,7 @@ def extract_all(
         log(f"Found {len(prt_paths)} .prt file(s) to process (after version filter).")
         for disk_path in prt_paths:
             disk_name = disk_path.name
-            label = part_display_name(folder, disk_path, recursive=recursive)
+            label = part_display_name(disk_path)
             staged_path: Path | None = None
             open_dir = str(disk_path.parent.resolve())
             open_name = disk_name
