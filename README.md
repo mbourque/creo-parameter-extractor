@@ -90,7 +90,7 @@ The page title is **Creo Parameter Extractor Report**. Failed parts appear as hi
 
 ### In the browser
 
-- **Search** — filter rows by text; choose **All fields** or a single column. Click **Search** or press Enter.
+- **Search** — filter rows by text; choose **All fields** or a single column. Click **Search** or press Enter. **Clear** resets the search box and field to **All fields** and shows every row again.
 - **Sort** — click a column header to sort ascending; click again for descending. ▲ / ▼ shows the active column.
 - **Field dropdown** — your last choice is remembered in the browser (`localStorage`) for the next report you open in that browser.
 
