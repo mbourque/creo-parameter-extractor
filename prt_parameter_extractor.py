@@ -17,7 +17,6 @@ import logging
 import os
 import webbrowser
 import re
-import secrets
 import shutil
 import socket
 import sys
@@ -254,12 +253,12 @@ def extract_work_dir(output_path: Path) -> Path:
 
 def copy_model_for_extract(disk_path: Path, work_dir: Path) -> tuple[Path, str, Path]:
     """
-    Copy a model into the output folder (flat temp name); return (dirname, open_name, temp_path).
+    Copy a model into the output folder (flat ``name.prt`` temp); return (dirname, open_name, temp_path).
 
-    All temps sit directly under ``work_dir`` (unique ``stem.__cextmp_<id>.prt`` names).
+    Uses a normal ``.prt`` filename (no extra dots in the stem) so Creo/CREOSON can open it.
+    Only one part is processed at a time; the temp file is deleted before the next copy.
     """
-    stem = Path(plain_prt_open_filename(disk_path.name)).stem
-    open_name = f"{stem}.__cextmp_{secrets.token_hex(4)}.prt"
+    open_name = plain_prt_open_filename(disk_path.name)
     work_dir.mkdir(parents=True, exist_ok=True)
     dest_file = work_dir / open_name
     shutil.copy2(disk_path, dest_file)
@@ -810,20 +809,25 @@ def extract_all(
                     disk_path, work_dir
                 )
                 open_dir = str(absolute_preserve_drive(local_dir))
+                if not temp_copy.is_file():
+                    raise FileNotFoundError(f"Temp copy was not created: {temp_copy}")
                 if cancelled():
                     stopped = True
                     aborted_by_stop = True
                     log(f"Stop before opening {label} — skipped.")
                     break
+                log(
+                    f"Opening {label} … (local temp: {open_name}, "
+                    f"{temp_copy.stat().st_size:,} bytes)"
+                )
                 client.creo_cd(open_dir)
                 in_session = open_name
-                log(f"Opening {label} … (local temp copy next to output)")
 
                 opened = client.file_open(
                     open_name,
                     dirname=open_dir,
                     display=False,
-                    activate=True,
+                    activate=False,
                 )
                 if isinstance(opened, dict):
                     fl = opened.get("files")
