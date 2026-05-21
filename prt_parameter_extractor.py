@@ -1119,17 +1119,30 @@ class App(tk.Tk):
         except OSError as ex:
             messagebox.showerror("Open report", f"Could not open report:\n{ex}")
 
-    def _show_completion_dialog(self, outp: Path, errs: list[str]) -> None:
+    def _show_completion_dialog(
+        self, outp: Path, errs: list[str], *, stopped: bool = False
+    ) -> None:
         resolved = absolute_preserve_drive(outp)
         dlg = tk.Toplevel(self)
-        dlg.title("Finished with errors" if errs else "Done")
+        if stopped:
+            dlg.title("Stopped")
+        elif errs:
+            dlg.title("Finished with errors")
+        else:
+            dlg.title("Done")
         dlg.transient(self)
         dlg.resizable(False, False)
 
         body = tk.Frame(dlg, padx=16, pady=12)
         body.pack()
 
-        if errs:
+        if stopped:
+            tk.Label(
+                body,
+                text="Extraction stopped. Partial report saved.",
+                justify=tk.LEFT,
+            ).pack(anchor="w")
+        elif errs:
             tk.Label(
                 body,
                 text=f"Report saved with {len(errs)} error(s).",
@@ -1145,10 +1158,22 @@ class App(tk.Tk):
                 fg="#800",
                 wraplength=420,
             ).pack(anchor="w", pady=(4, 8))
-        else:
+        elif not stopped:
             tk.Label(body, text="Report saved successfully.", justify=tk.LEFT).pack(
                 anchor="w"
             )
+
+        if stopped and errs:
+            err_preview = "\n".join(errs[:8])
+            if len(errs) > 8:
+                err_preview += f"\n… and {len(errs) - 8} more (see log)."
+            tk.Label(
+                body,
+                text=err_preview,
+                justify=tk.LEFT,
+                fg="#800",
+                wraplength=420,
+            ).pack(anchor="w", pady=(4, 8))
 
         tk.Label(
             body,
@@ -1201,10 +1226,7 @@ class App(tk.Tk):
         """UI follow-up after the user stopped extraction (main thread only)."""
         self._set_extract_idle()
         self._append_log(f"Stopped. Partial report saved to {absolute_preserve_drive(outp)}")
-        messagebox.showinfo(
-            "Stopped",
-            f"Extraction stopped.\n\nPartial report saved to:\n{absolute_preserve_drive(outp)}",
-        )
+        self._show_completion_dialog(outp, errs, stopped=True)
 
     def _run_fail(self, err: BaseException) -> None:
         """UI follow-up after extract or save failed (main thread only)."""
