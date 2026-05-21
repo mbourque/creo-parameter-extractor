@@ -7,9 +7,6 @@ models/
 *.htm
 *.txt
 
-# Local Creo extract copies (beside HTML output)
-.creo_param_extract_workspace/
-
 # Python
 venv/
 __pycache__/

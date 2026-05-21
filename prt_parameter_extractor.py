@@ -17,6 +17,7 @@ import logging
 import os
 import webbrowser
 import re
+import secrets
 import shutil
 import socket
 import sys
@@ -244,36 +245,27 @@ def part_display_name(disk_path: Path) -> str:
     return plain_prt_open_filename(disk_path.name)
 
 
-_WORKSPACE_DIRNAME = ".creo_param_extract_workspace"
+def extract_work_dir(output_path: Path) -> Path:
+    """Folder containing the HTML report; used for local temp copies for Creo/CREOSON."""
+    work_dir = absolute_preserve_drive(output_path).parent
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return work_dir
 
 
-def reset_extract_workspace(output_path: Path) -> Path:
-    """
-    Local folder beside the HTML report for copies Creo/CREOSON open.
-
-    Cleared at the start of each extract run.
-    """
-    workspace = absolute_preserve_drive(output_path).parent / _WORKSPACE_DIRNAME
-    if workspace.exists():
-        shutil.rmtree(workspace)
-    workspace.mkdir(parents=True, exist_ok=True)
-    return workspace
-
-
-def copy_model_into_workspace(
+def copy_model_for_extract(
     disk_path: Path,
     models_root: Path,
-    workspace: Path,
+    work_dir: Path,
     *,
     recursive: bool,
-) -> tuple[Path, str]:
+) -> tuple[Path, str, Path]:
     """
-    Copy a model into the workspace mirror; return (dirname, filename) for file_open.
+    Copy a model into the output folder (temp name); return (dirname, open_name, temp_path).
 
-    ``*.prt.N`` is copied as ``stem.prt``. Subfolder layout matches the models tree
-    when recursive search is enabled.
+    Temp files use ``stem.__cextmp_<id>.prt`` and are removed after each part is processed.
     """
-    open_name = plain_prt_open_filename(disk_path.name)
+    stem = Path(plain_prt_open_filename(disk_path.name)).stem
+    open_name = f"{stem}.__cextmp_{secrets.token_hex(4)}.prt"
     if recursive:
         try:
             rel_dir = disk_path.relative_to(models_root).parent
@@ -281,11 +273,11 @@ def copy_model_into_workspace(
             rel_dir = Path(".")
     else:
         rel_dir = Path(".")
-    dest_dir = workspace / rel_dir
+    dest_dir = work_dir / rel_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_file = dest_dir / open_name
     shutil.copy2(disk_path, dest_file)
-    return dest_dir, open_name
+    return dest_dir, open_name, dest_file
 
 
 def _format_param_value(entry: dict) -> str:
@@ -739,7 +731,7 @@ def extract_all(
     """
     Connect to CREOSON, open each latest .prt, list parameters, erase from session.
 
-    Models are copied into a local workspace next to ``output_path``; Creo/CREOSON
+    Models are copied as temp files into the same folder as ``output_path``; Creo/CREOSON
     only see that local path (not the models folder on a share).
 
     If ``parameter_names`` is empty, every parameter found on any processed model is
@@ -766,8 +758,8 @@ def extract_all(
     )
     client = TimeoutClient(host, port)
     client.connect()
-    workspace = reset_extract_workspace(output_path)
-    workspace_s = str(workspace)
+    work_dir = extract_work_dir(output_path)
+    work_dir_s = str(work_dir)
     try:
         try:
             running = client.is_creo_running()
@@ -780,9 +772,9 @@ def extract_all(
         except Exception as ex:  # noqa: BLE001
             log(f"Could not query is_creo_running: {ex}")
 
-        log(f"Local extract workspace (for Creo/CREOSON):\n  {workspace_s}")
+        log(f"Local temp folder (same as output file, for Creo/CREOSON):\n  {work_dir_s}")
         log(f"Models source folder:\n  {folder}")
-        client.creo_cd(workspace_s)
+        client.creo_cd(work_dir_s)
         prt_paths = iter_latest_prt_files(folder, recursive=recursive)
         if recursive:
             log("Recursive search enabled — including .prt files in subfolders.")
@@ -790,13 +782,14 @@ def extract_all(
         for disk_path in prt_paths:
             label = part_display_name(disk_path)
             in_session = ""
+            temp_copy: Path | None = None
             try:
-                local_dir, open_name = copy_model_into_workspace(
-                    disk_path, folder, workspace, recursive=recursive
+                local_dir, open_name, temp_copy = copy_model_for_extract(
+                    disk_path, folder, work_dir, recursive=recursive
                 )
                 open_dir = str(absolute_preserve_drive(local_dir))
                 in_session = open_name
-                log(f"Opening {label} … (local copy in workspace)")
+                log(f"Opening {label} … (local temp copy next to output)")
 
                 opened = client.file_open(
                     open_name,
@@ -851,18 +844,18 @@ def extract_all(
                         client.file_erase(file_=open_name)
                     except Exception:
                         pass
+            finally:
+                if temp_copy is not None:
+                    try:
+                        temp_copy.unlink(missing_ok=True)
+                    except OSError:
+                        pass
     finally:
         log("Disconnecting from CREOSON …")
         try:
             client.disconnect()
         except Exception:
             pass
-        if workspace.exists():
-            try:
-                shutil.rmtree(workspace)
-                log("Removed local extract workspace.")
-            except OSError as ex:
-                log(f"Could not remove workspace {workspace_s}: {ex}")
 
     if parameter_names:
         column_names = parameter_names

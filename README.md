@@ -22,7 +22,7 @@ You do **not** open each part by hand or copy parameters from the Creo UI. You d
 | **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine.               |
 | **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                                             |
 | **Parameters**    | Comma-separated parameter names to extract (e.g. `DESCRIPTION, MATERIAL, REV`). Spaces after commas are ignored. Matching is **case-insensitive**. **Leave blank** to include **every** parameter found on any processed model (columns are the union of names across parts). |
-| **Output file**   | Path for the HTML report (e.g. `C:\reports\parameters.html`). Use **Browse…** to choose a **local** folder when models live on a network share. A subfolder `.creo_param_extract_workspace` is created there, models are copied in for Creo/CREOSON, then removed after the run. If you omit `.html`, it is added when you run. |
+| **Output file**   | Path for the HTML report (e.g. `C:\reports\parameters.html`). Use **Browse…** to choose a **local** folder when models live on a network share. Each part is copied there as a short-lived temp `*.prt` for Creo/CREOSON, then deleted. If you omit `.html`, it is added when you run. |
 
 ### Options menu
 
@@ -67,7 +67,7 @@ For each logical part name in a given folder:
 
 With recursion enabled, `subasm\bracket.prt` and `hardware\bracket.prt` are **two separate** parts (grouped per folder + name).
 
-Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are copied into the workspace as `name.prt` before open (Creo cannot open `.prt.N` by name through CREOSON). Creo’s working directory is the **local workspace** next to your HTML report, not the network models folder.
+Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are copied as temp `name.__cextmp_….prt` files in the **same folder as your HTML output** before open (Creo cannot open `.prt.N` by name through CREOSON). Creo’s working directory is that output folder, not the network models folder.
 
 ### Part name in the report
 
@@ -124,8 +124,8 @@ Example keys:
 | `Pro/TOOLKIT … General Error`                           | Open the part manually in Creo; fix regen errors or missing references. Ensure related files sit in the same folder as the part. |
 | CREOSON **Stop** hangs                                  | Exit Creo first, then stop CREOSON; or end the CREOSON/Java process in Task Manager.                                             |
 | `0 .prt file(s) found`                                  | Folder path wrong; no matching files in that directory; or parts are in **subfolders** — enable **Options → Recursively find files**. |
-| UNC path (`\\server\share\...`) or `creo_cd` fails on network library | Point **Models folder** at the share, but set **Output file** to a **local** path (e.g. `C:\reports\out.html`). Creo/CREOSON use only the local workspace beside that file. UNC as models folder is OK for copying; Creo never uses UNC as WD. |
-| CREOSON: `Directory does not exist` for `Z:\...`        | Same: use a **local** output path. Models are read from `Z:\` (or UNC) and copied into `.creo_param_extract_workspace` under the output folder. |
+| UNC path (`\\server\share\...`) or `creo_cd` fails on network library | Point **Models folder** at the share, but set **Output file** to a **local** path (e.g. `C:\reports\out.html`). Creo/CREOSON use only that output folder for temp copies. UNC as models folder is OK for reading; Creo never uses UNC as WD. |
+| CREOSON: `Directory does not exist` for `Z:\...`        | Same: use a **local** output path. Models are read from `Z:\` (or UNC) and copied as temp files next to the HTML report. |
 
 ---
 
