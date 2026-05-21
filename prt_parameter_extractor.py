@@ -17,7 +17,6 @@ import logging
 import os
 import webbrowser
 import re
-import secrets
 import shutil
 import socket
 import sys
@@ -166,6 +165,62 @@ def plain_prt_open_filename(versioned_disk_name: str) -> str:
     return f"{m.group('stem')}.prt"
 
 
+def absolute_preserve_drive(path: Path) -> Path:
+    """
+    Make a path absolute without resolve().
+
+    On Windows, resolve() often rewrites mapped drives (Z:) to UNC (\\\\server\\share),
+    which Creo and CREOSON handle poorly for working directories.
+    """
+    return path.absolute()
+
+
+def is_unc_path(path: Path) -> bool:
+    """True if path is a UNC path (\\\\server\\share\\...)."""
+    text = str(path)
+    if text.startswith("\\\\") or text.startswith("//"):
+        return True
+    try:
+        return not path.drive and path.anchor.startswith("\\\\")
+    except (ValueError, OSError):
+        return False
+
+
+def is_windows_mapped_network_drive(path: Path) -> bool:
+    """True if path is on a Windows drive letter that maps to a network share."""
+    if sys.platform != "win32":
+        return False
+    drive = path.drive
+    if len(drive) != 2 or drive[1] != ":":
+        return False
+    try:
+        import ctypes
+
+        return ctypes.windll.kernel32.GetDriveTypeW(f"{drive[0]}:\\") == 4  # DRIVE_REMOTE
+    except (AttributeError, OSError):
+        return False
+
+
+def models_folder_path_warnings(folder: Path) -> str | None:
+    """User-facing warning when the models folder may fail with Creo/CREOSON."""
+    folder = absolute_preserve_drive(folder)
+    if is_unc_path(folder):
+        return (
+            "The models folder is a UNC path (\\\\server\\share\\...).\n\n"
+            "Creo usually cannot use a UNC path as the working directory, and "
+            "this tool avoids converting mapped drives to UNC. Use a local folder "
+            "or a mapped drive letter (e.g. Z:\\...) instead."
+        )
+    if is_windows_mapped_network_drive(folder):
+        return (
+            f"The models folder is on mapped drive {folder.drive}\\\n\n"
+            "Creo may see this drive, but CREOSON sometimes cannot (\"Directory "
+            "does not exist\"). If extraction fails, use a local copy of the "
+            "library or ask IT to map the drive for the CREOSON service."
+        )
+    return None
+
+
 def prt_file_link_path(disk_path: Path) -> Path:
     """
     Path for file:// links in the HTML report.
@@ -181,7 +236,7 @@ def prt_file_link_path(disk_path: Path) -> Path:
 
 def file_uri_full_path(disk_path: Path) -> str:
     """``file:///`` URI with a fully qualified absolute path (never relative)."""
-    return prt_file_link_path(disk_path).resolve().as_uri()
+    return absolute_preserve_drive(prt_file_link_path(disk_path)).as_uri()
 
 
 def part_display_name(disk_path: Path) -> str:
@@ -189,19 +244,48 @@ def part_display_name(disk_path: Path) -> str:
     return plain_prt_open_filename(disk_path.name)
 
 
-def stage_versioned_prt_beside_original(disk_path: Path) -> tuple[str, Path]:
-    """
-    Copy ``*.prt.N`` next to the original as a uniquely named ``*.prt``.
+_WORKSPACE_DIRNAME = ".creo_param_extract_workspace"
 
-    Keeps the same directory as the source file so references to other models in
-    that folder still resolve (staging under %TEMP% breaks that).
+
+def reset_extract_workspace(output_path: Path) -> Path:
     """
-    plain = plain_prt_open_filename(disk_path.name)
-    stem = Path(plain).stem
-    staged_name = f"{stem}.__cextmp_{secrets.token_hex(4)}.prt"
-    staged_path = disk_path.parent / staged_name
-    shutil.copy2(disk_path, staged_path)
-    return staged_name, staged_path
+    Local folder beside the HTML report for copies Creo/CREOSON open.
+
+    Cleared at the start of each extract run.
+    """
+    workspace = absolute_preserve_drive(output_path).parent / _WORKSPACE_DIRNAME
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
+def copy_model_into_workspace(
+    disk_path: Path,
+    models_root: Path,
+    workspace: Path,
+    *,
+    recursive: bool,
+) -> tuple[Path, str]:
+    """
+    Copy a model into the workspace mirror; return (dirname, filename) for file_open.
+
+    ``*.prt.N`` is copied as ``stem.prt``. Subfolder layout matches the models tree
+    when recursive search is enabled.
+    """
+    open_name = plain_prt_open_filename(disk_path.name)
+    if recursive:
+        try:
+            rel_dir = disk_path.relative_to(models_root).parent
+        except ValueError:
+            rel_dir = Path(".")
+    else:
+        rel_dir = Path(".")
+    dest_dir = workspace / rel_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_file = dest_dir / open_name
+    shutil.copy2(disk_path, dest_file)
+    return dest_dir, open_name
 
 
 def _format_param_value(entry: dict) -> str:
@@ -262,10 +346,10 @@ def iter_latest_prt_files(folder: Path, *, recursive: bool = False) -> list[Path
         entries = groups[base]
         plain = next((p for r, p in entries if r == 10**9), None)
         if plain is not None:
-            chosen.append(plain.resolve())
+            chosen.append(absolute_preserve_drive(plain))
         else:
             entries.sort(key=lambda t: t[0], reverse=True)
-            chosen.append(entries[0][1].resolve())
+            chosen.append(absolute_preserve_drive(entries[0][1]))
     return chosen
 
 
@@ -646,6 +730,7 @@ def extract_all(
     host: str,
     port: int,
     *,
+    output_path: Path,
     parameter_names: list[str],
     report_title: str = "Creo Parameter Extractor Report",
     recursive: bool = False,
@@ -653,6 +738,9 @@ def extract_all(
 ) -> tuple[str, list[str]]:
     """
     Connect to CREOSON, open each latest .prt, list parameters, erase from session.
+
+    Models are copied into a local workspace next to ``output_path``; Creo/CREOSON
+    only see that local path (not the models folder on a share).
 
     If ``parameter_names`` is empty, every parameter found on any processed model is
     included (union of names, columns in Creo list order).
@@ -664,7 +752,7 @@ def extract_all(
         if progress:
             progress(msg)
 
-    folder = folder.resolve()
+    folder = absolute_preserve_drive(folder)
     errors: list[str] = []
     pending: list[dict[str, object]] = []
     extract_all_params = not parameter_names
@@ -678,6 +766,8 @@ def extract_all(
     )
     client = TimeoutClient(host, port)
     client.connect()
+    workspace = reset_extract_workspace(output_path)
+    workspace_s = str(workspace)
     try:
         try:
             running = client.is_creo_running()
@@ -690,31 +780,23 @@ def extract_all(
         except Exception as ex:  # noqa: BLE001
             log(f"Could not query is_creo_running: {ex}")
 
-        wd = str(folder.resolve())
-        log(f"Setting Creo working directory to:\n  {wd}")
-        client.creo_cd(wd)
+        log(f"Local extract workspace (for Creo/CREOSON):\n  {workspace_s}")
+        log(f"Models source folder:\n  {folder}")
+        client.creo_cd(workspace_s)
         prt_paths = iter_latest_prt_files(folder, recursive=recursive)
         if recursive:
             log("Recursive search enabled — including .prt files in subfolders.")
         log(f"Found {len(prt_paths)} .prt file(s) to process (after version filter).")
         for disk_path in prt_paths:
-            disk_name = disk_path.name
             label = part_display_name(disk_path)
-            staged_path: Path | None = None
-            open_dir = str(disk_path.parent.resolve())
-            open_name = disk_name
-            in_session = open_name
+            in_session = ""
             try:
-                if is_versioned_prt_disk_filename(disk_name):
-                    open_name, staged_path = stage_versioned_prt_beside_original(
-                        disk_path
-                    )
-                    log(
-                        f"Opening {label} … "
-                        f"(staged as {open_name} in same folder for references)"
-                    )
-                else:
-                    log(f"Opening {label} …")
+                local_dir, open_name = copy_model_into_workspace(
+                    disk_path, folder, workspace, recursive=recursive
+                )
+                open_dir = str(absolute_preserve_drive(local_dir))
+                in_session = open_name
+                log(f"Opening {label} … (local copy in workspace)")
 
                 opened = client.file_open(
                     open_name,
@@ -737,7 +819,7 @@ def extract_all(
                 pending.append(
                     {
                         "part_name": label,
-                        "file_path": disk_path.resolve(),
+                        "file_path": absolute_preserve_drive(disk_path),
                         "plist": plist,
                         "error": None,
                     }
@@ -749,7 +831,7 @@ def extract_all(
                 pending.append(
                     {
                         "part_name": label,
-                        "file_path": disk_path.resolve(),
+                        "file_path": absolute_preserve_drive(disk_path),
                         "plist": None,
                         "error": str(ex),
                     }
@@ -769,18 +851,18 @@ def extract_all(
                         client.file_erase(file_=open_name)
                     except Exception:
                         pass
-            finally:
-                if staged_path is not None:
-                    try:
-                        staged_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
     finally:
         log("Disconnecting from CREOSON …")
         try:
             client.disconnect()
         except Exception:
             pass
+        if workspace.exists():
+            try:
+                shutil.rmtree(workspace)
+                log("Removed local extract workspace.")
+            except OSError as ex:
+                log(f"Could not remove workspace {workspace_s}: {ex}")
 
     if parameter_names:
         column_names = parameter_names
@@ -992,7 +1074,7 @@ class App(tk.Tk):
         self.after(0, lambda m=msg: self._append_log(m))
 
     def _open_html_report(self, path: Path) -> None:
-        resolved = path.resolve()
+        resolved = absolute_preserve_drive(path)
         try:
             if sys.platform == "win32":
                 os.startfile(resolved)  # noqa: S606 — default app for .html
@@ -1002,7 +1084,7 @@ class App(tk.Tk):
             messagebox.showerror("Open report", f"Could not open report:\n{ex}")
 
     def _show_completion_dialog(self, outp: Path, errs: list[str]) -> None:
-        resolved = outp.resolve()
+        resolved = absolute_preserve_drive(outp)
         dlg = tk.Toplevel(self)
         dlg.title("Finished with errors" if errs else "Done")
         dlg.transient(self)
@@ -1059,7 +1141,7 @@ class App(tk.Tk):
     def _run_done(self, outp: Path, errs: list[str]) -> None:
         """UI follow-up after a successful extract (main thread only)."""
         self.run_btn.config(state=tk.NORMAL)
-        self._append_log(f"Wrote {outp.resolve()}")
+        self._append_log(f"Wrote {absolute_preserve_drive(outp)}")
         if errs:
             self._append_log(f"Completed with {len(errs)} error(s).")
         else:
@@ -1073,9 +1155,14 @@ class App(tk.Tk):
         messagebox.showerror("Error", str(err))
 
     def _run(self) -> None:
-        folder = Path(self.folder_var.get().strip())
+        folder = absolute_preserve_drive(Path(self.folder_var.get().strip()))
         if not folder.is_dir():
             messagebox.showerror("Invalid folder", "Choose a valid folder with Creo models.")
+            return
+        path_warn = models_folder_path_warnings(folder)
+        if path_warn and not messagebox.askyesno(
+            "Network path warning", f"{path_warn}\n\nContinue anyway?"
+        ):
             return
         param_names = parse_parameter_names(self.params_var.get())
         out_path = self.out_var.get().strip()
@@ -1085,6 +1172,15 @@ class App(tk.Tk):
         if not out_path.lower().endswith(".html"):
             out_path = str(Path(out_path).with_suffix(".html"))
             self.out_var.set(out_path)
+        outp = absolute_preserve_drive(Path(out_path))
+        try:
+            outp.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as ex:
+            messagebox.showerror(
+                "Output file",
+                f"Cannot create output folder:\n{outp.parent}\n\n{ex}",
+            )
+            return
         try:
             port = int(self.port_var.get().strip())
         except ValueError:
@@ -1095,6 +1191,8 @@ class App(tk.Tk):
         self.run_btn.config(state=tk.DISABLED)
         self.log.delete("1.0", tk.END)
         self._append_log("Starting…")
+        if path_warn:
+            self._append_log("Note: network path warning was acknowledged.")
 
         def job() -> None:
             try:
@@ -1102,11 +1200,11 @@ class App(tk.Tk):
                     folder,
                     host,
                     port,
+                    output_path=outp,
                     parameter_names=param_names,
                     recursive=bool(self.recursive_var.get()),
                     progress=self._log_from_worker,
                 )
-                outp = Path(out_path)
                 outp.write_text(report, encoding="utf-8")
                 # Default-arg binding: exception/loop variables are cleared before
                 # Tk runs idle callbacks (Python 3.11+), so closures must not rely
