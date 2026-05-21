@@ -252,32 +252,18 @@ def extract_work_dir(output_path: Path) -> Path:
     return work_dir
 
 
-def copy_model_for_extract(
-    disk_path: Path,
-    models_root: Path,
-    work_dir: Path,
-    *,
-    recursive: bool,
-) -> tuple[Path, str, Path]:
+def copy_model_for_extract(disk_path: Path, work_dir: Path) -> tuple[Path, str, Path]:
     """
-    Copy a model into the output folder (temp name); return (dirname, open_name, temp_path).
+    Copy a model into the output folder (flat temp name); return (dirname, open_name, temp_path).
 
-    Temp files use ``stem.__cextmp_<id>.prt`` and are removed after each part is processed.
+    All temps sit directly under ``work_dir`` (unique ``stem.__cextmp_<id>.prt`` names).
     """
     stem = Path(plain_prt_open_filename(disk_path.name)).stem
     open_name = f"{stem}.__cextmp_{secrets.token_hex(4)}.prt"
-    if recursive:
-        try:
-            rel_dir = disk_path.relative_to(models_root).parent
-        except ValueError:
-            rel_dir = Path(".")
-    else:
-        rel_dir = Path(".")
-    dest_dir = work_dir / rel_dir
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_file = dest_dir / open_name
+    work_dir.mkdir(parents=True, exist_ok=True)
+    dest_file = work_dir / open_name
     shutil.copy2(disk_path, dest_file)
-    return dest_dir, open_name, dest_file
+    return work_dir, open_name, dest_file
 
 
 def _format_param_value(entry: dict) -> str:
@@ -809,8 +795,6 @@ def extract_all(
         if cancelled():
             stopped = True
             log("Stop requested before processing models.")
-        else:
-            client.creo_cd(work_dir_s)
         for disk_path in prt_paths:
             if cancelled():
                 stopped = True
@@ -820,11 +804,18 @@ def extract_all(
             in_session = ""
             open_name = ""
             temp_copy: Path | None = None
+            aborted_by_stop = False
             try:
                 local_dir, open_name, temp_copy = copy_model_for_extract(
-                    disk_path, folder, work_dir, recursive=recursive
+                    disk_path, work_dir
                 )
                 open_dir = str(absolute_preserve_drive(local_dir))
+                if cancelled():
+                    stopped = True
+                    aborted_by_stop = True
+                    log(f"Stop before opening {label} — skipped.")
+                    break
+                client.creo_cd(open_dir)
                 in_session = open_name
                 log(f"Opening {label} … (local temp copy next to output)")
 
@@ -856,16 +847,19 @@ def extract_all(
                 )
                 _erase_from_session(client, in_session=in_session, open_name=open_name)
             except Exception as ex:  # noqa: BLE001 — surface any Creo/Creoson failure
-                errors.append(f"{label}: {ex}")
                 log(f"  Error: {ex}")
-                pending.append(
-                    {
-                        "part_name": label,
-                        "file_path": absolute_preserve_drive(disk_path),
-                        "plist": None,
-                        "error": str(ex),
-                    }
-                )
+                if cancelled() or aborted_by_stop:
+                    log(f"  Not recording {label} in report (stop in progress).")
+                else:
+                    errors.append(f"{label}: {ex}")
+                    pending.append(
+                        {
+                            "part_name": label,
+                            "file_path": absolute_preserve_drive(disk_path),
+                            "plist": None,
+                            "error": str(ex),
+                        }
+                    )
                 try:
                     if open_name and client.file_open_errors(file_=open_name):
                         log(
@@ -908,6 +902,8 @@ def extract_all(
 
     table_rows: list[dict[str, object]] = []
     for p in pending:
+        if stopped and p.get("error"):
+            continue
         err = p.get("error")
         if err:
             table_rows.append(
