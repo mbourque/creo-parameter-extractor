@@ -298,8 +298,10 @@ def _prt_group_key(folder: Path, path: Path, *, recursive: bool) -> str:
 def iter_latest_prt_files(folder: Path, *, recursive: bool = False) -> list[Path]:
     """
     For each logical model name (*.prt or *.prt.N), pick one file to open:
-    - If `name.prt` exists in the same folder, it is used instead of `name.prt.N`.
-    - Otherwise choose the path whose numeric suffix is largest (.10 over .9).
+    - If only ``name.prt`` exists, it is used.
+    - If only versioned files exist (``name.prt.5``, …), the highest number wins.
+    - If both ``name.prt`` and versioned files exist, the highest version wins
+      (e.g. ``name.prt.10`` over ``name.prt`` and ``name.prt.9``).
 
     When ``recursive`` is True, scans all subfolders; the same filename in different
     folders is treated as separate models.
@@ -315,18 +317,15 @@ def iter_latest_prt_files(folder: Path, *, recursive: bool = False) -> list[Path
             continue
         key = _prt_group_key(folder, path, recursive=recursive)
         ver_s = m.group("ver")
-        rank = int(ver_s) if ver_s is not None else 10**9
+        # Plain name.prt is rank 0; name.prt.N uses N so the highest wins when both exist.
+        rank = int(ver_s) if ver_s is not None else 0
         groups.setdefault(key, []).append((rank, path))
 
     chosen: list[Path] = []
     for base in sorted(groups.keys(), key=str.lower):
         entries = groups[base]
-        plain = next((p for r, p in entries if r == 10**9), None)
-        if plain is not None:
-            chosen.append(absolute_preserve_drive(plain))
-        else:
-            entries.sort(key=lambda t: t[0], reverse=True)
-            chosen.append(absolute_preserve_drive(entries[0][1]))
+        entries.sort(key=lambda t: t[0], reverse=True)
+        chosen.append(absolute_preserve_drive(entries[0][1]))
     return chosen
 
 

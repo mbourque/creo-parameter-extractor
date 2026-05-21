@@ -62,12 +62,13 @@ The log should show `Checking TCP localhost:9056 …` then `Connecting to CREOSO
 
 For each logical part name in a given folder:
 
-- If **`name.prt`** exists, that file is used.
-- Otherwise the file with the **highest number** is used (e.g. `name.prt.10` over `name.prt.9`).
+- If only **`name.prt`** exists, that file is used.
+- If only versioned files exist (`name.prt.5`, …), the **highest number** is used (e.g. `name.prt.10` over `name.prt.9`).
+- If **`name.prt`** and versioned files both exist, the **highest version** is used (e.g. `name.prt.10` over `name.prt` and `name.prt.9`).
 
 With recursion enabled, `subasm\bracket.prt` and `hardware\bracket.prt` are **two separate** parts (grouped per folder + name).
 
-Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are copied as temp `name.__cextmp_….prt` files in the **same folder as your HTML output** before open (Creo cannot open `.prt.N` by name through CREOSON). Creo’s working directory is that output folder, not the network models folder.
+Files that are only `*.prt.N` on disk (e.g. `ec-j1000-0011.prt.7`) are copied as a temp `name.prt` in the **same folder as your HTML output** before open (Creo cannot open `.prt.N` by name through CREOSON). Creo’s working directory is that output folder, not the network models folder.
 
 ### Part name in the report
 
