@@ -36,7 +36,7 @@ You do **not** open each part by hand or copy parameters from the Creo UI. You d
 2. Start **CREOSON** and confirm it is listening on the port you entered.
 3. Run this app — either double-click `CreoParameterExtractor.exe` in the project folder, or from a terminal run `python prt_parameter_extractor.py` (Python install required for the latter; see **Installation and setup** below).
 4. Set **Models folder**, **Parameters** (or leave blank for all), and **Output file**. Use **Options → Recursively find files** if parts live in subfolders.
-5. Click **Extract parameters**.
+5. Click **Extract parameters**. Use **Stop** to cancel: the current part is finished cleanly (erase from session, temp file removed), CREOSON disconnects, and a **partial** HTML report is saved if any parts completed.
 6. Watch the **Log** area for progress. When finished, a dialog shows the saved path and offers **Open report** (opens the HTML in your default browser).
 
 ### Typical workflow

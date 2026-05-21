@@ -717,6 +717,29 @@ class TimeoutClient(creopyson.Client):
         return json_result.get("data", None)
 
 
+def _erase_from_session(
+    client: creopyson.Client, *, in_session: str, open_name: str
+) -> None:
+    """Best-effort erase so Creo does not keep the model in memory after a part finishes."""
+    for name in (in_session, open_name):
+        if not name:
+            continue
+        try:
+            client.file_erase(file_=name)
+            return
+        except Exception:
+            pass
+
+
+def _session_cleanup_after_stop(client: creopyson.Client, log: Callable[[str], None]) -> None:
+    """Clear non-displayed models left in session after a user stop."""
+    try:
+        client.erase_not_displayed()
+        log("Erased non-displayed models from Creo session.")
+    except Exception as ex:  # noqa: BLE001
+        log(f"Could not erase non-displayed models: {ex}")
+
+
 def extract_all(
     folder: Path,
     host: str,
@@ -726,8 +749,9 @@ def extract_all(
     parameter_names: list[str],
     report_title: str = "Creo Parameter Extractor Report",
     recursive: bool = False,
+    cancel_event: threading.Event | None = None,
     progress: Callable[[str], None] | None = None,
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str], bool]:
     """
     Connect to CREOSON, open each latest .prt, list parameters, erase from session.
 
@@ -738,13 +762,17 @@ def extract_all(
     included (union of names, columns in Creo list order).
 
     Returns:
-        (html_report, list of error lines)
+        (html_report, list of error lines, cancelled_by_user)
     """
     def log(msg: str) -> None:
         if progress:
             progress(msg)
 
+    def cancelled() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
     folder = absolute_preserve_drive(folder)
+    stopped = False
     errors: list[str] = []
     pending: list[dict[str, object]] = []
     extract_all_params = not parameter_names
@@ -774,14 +802,23 @@ def extract_all(
 
         log(f"Local temp folder (same as output file, for Creo/CREOSON):\n  {work_dir_s}")
         log(f"Models source folder:\n  {folder}")
-        client.creo_cd(work_dir_s)
         prt_paths = iter_latest_prt_files(folder, recursive=recursive)
         if recursive:
             log("Recursive search enabled — including .prt files in subfolders.")
         log(f"Found {len(prt_paths)} .prt file(s) to process (after version filter).")
+        if cancelled():
+            stopped = True
+            log("Stop requested before processing models.")
+        else:
+            client.creo_cd(work_dir_s)
         for disk_path in prt_paths:
+            if cancelled():
+                stopped = True
+                log("Stop requested — no further models will be opened.")
+                break
             label = part_display_name(disk_path)
             in_session = ""
+            open_name = ""
             temp_copy: Path | None = None
             try:
                 local_dir, open_name, temp_copy = copy_model_for_extract(
@@ -817,7 +854,7 @@ def extract_all(
                         "error": None,
                     }
                 )
-                client.file_erase(file_=in_session)
+                _erase_from_session(client, in_session=in_session, open_name=open_name)
             except Exception as ex:  # noqa: BLE001 — surface any Creo/Creoson failure
                 errors.append(f"{label}: {ex}")
                 log(f"  Error: {ex}")
@@ -830,20 +867,14 @@ def extract_all(
                     }
                 )
                 try:
-                    if client.file_open_errors(file_=open_name):
+                    if open_name and client.file_open_errors(file_=open_name):
                         log(
                             "  Creo file_open_errors() is true — check the model "
                             "in Creo for regen failures or missing references."
                         )
                 except Exception:
                     pass
-                try:
-                    client.file_erase(file_=in_session)
-                except Exception:
-                    try:
-                        client.file_erase(file_=open_name)
-                    except Exception:
-                        pass
+                _erase_from_session(client, in_session=in_session, open_name=open_name)
             finally:
                 if temp_copy is not None:
                     try:
@@ -851,6 +882,8 @@ def extract_all(
                     except OSError:
                         pass
     finally:
+        if stopped:
+            _session_cleanup_after_stop(client, log)
         log("Disconnecting from CREOSON …")
         try:
             client.disconnect()
@@ -911,7 +944,9 @@ def extract_all(
             rows=table_rows,
             errors=errors,
         )
-    return report, errors
+    if stopped:
+        errors = [*errors, "Extraction stopped by user."]
+    return report, errors, stopped
 
 
 class App(tk.Tk):
@@ -995,7 +1030,15 @@ class App(tk.Tk):
         btn_row = tk.Frame(frm)
         btn_row.pack(fill=tk.X, pady=(4, 6))
         self.run_btn = tk.Button(btn_row, text="Extract parameters", command=self._run)
-        self.run_btn.pack(side=tk.LEFT)
+        self.run_btn.pack(side=tk.LEFT, padx=(0, 8))
+        self.stop_btn = tk.Button(
+            btn_row,
+            text="Stop",
+            command=self._stop_extract,
+            state=tk.DISABLED,
+        )
+        self.stop_btn.pack(side=tk.LEFT)
+        self._cancel_event = threading.Event()
 
         tk.Label(frm, text="Log").pack(anchor="w")
         self.log = scrolledtext.ScrolledText(frm, height=18, wrap=tk.WORD, font=("Consolas", 10))
@@ -1131,9 +1174,22 @@ class App(tk.Tk):
         dlg.update_idletasks()
         dlg.geometry(f"+{self.winfo_rootx() + 40}+{self.winfo_rooty() + 40}")
 
+    def _set_extract_idle(self) -> None:
+        self.run_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self._cancel_event.clear()
+
+    def _stop_extract(self) -> None:
+        if not self._cancel_event.is_set():
+            self._cancel_event.set()
+            self.stop_btn.config(state=tk.DISABLED)
+            self._append_log(
+                "Stop requested — finishing the current part, then cleaning up …"
+            )
+
     def _run_done(self, outp: Path, errs: list[str]) -> None:
         """UI follow-up after a successful extract (main thread only)."""
-        self.run_btn.config(state=tk.NORMAL)
+        self._set_extract_idle()
         self._append_log(f"Wrote {absolute_preserve_drive(outp)}")
         if errs:
             self._append_log(f"Completed with {len(errs)} error(s).")
@@ -1141,9 +1197,18 @@ class App(tk.Tk):
             self._append_log("Done.")
         self._show_completion_dialog(outp, errs)
 
+    def _run_stopped(self, outp: Path, errs: list[str]) -> None:
+        """UI follow-up after the user stopped extraction (main thread only)."""
+        self._set_extract_idle()
+        self._append_log(f"Stopped. Partial report saved to {absolute_preserve_drive(outp)}")
+        messagebox.showinfo(
+            "Stopped",
+            f"Extraction stopped.\n\nPartial report saved to:\n{absolute_preserve_drive(outp)}",
+        )
+
     def _run_fail(self, err: BaseException) -> None:
         """UI follow-up after extract or save failed (main thread only)."""
-        self.run_btn.config(state=tk.NORMAL)
+        self._set_extract_idle()
         self._append_log(f"Failed: {err}")
         messagebox.showerror("Error", str(err))
 
@@ -1181,7 +1246,9 @@ class App(tk.Tk):
             return
 
         host = self.host_var.get().strip() or "localhost"
+        self._cancel_event.clear()
         self.run_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
         self.log.delete("1.0", tk.END)
         self._append_log("Starting…")
         if path_warn:
@@ -1189,20 +1256,24 @@ class App(tk.Tk):
 
         def job() -> None:
             try:
-                report, errs = extract_all(
+                report, errs, stopped = extract_all(
                     folder,
                     host,
                     port,
                     output_path=outp,
                     parameter_names=param_names,
                     recursive=bool(self.recursive_var.get()),
+                    cancel_event=self._cancel_event,
                     progress=self._log_from_worker,
                 )
                 outp.write_text(report, encoding="utf-8")
                 # Default-arg binding: exception/loop variables are cleared before
                 # Tk runs idle callbacks (Python 3.11+), so closures must not rely
                 # on bare `ex` / outer locals without capturing copies.
-                self.after(0, lambda o=outp, e=errs: self._run_done(o, e))
+                if stopped:
+                    self.after(0, lambda o=outp, e=errs: self._run_stopped(o, e))
+                else:
+                    self.after(0, lambda o=outp, e=errs: self._run_done(o, e))
             except Exception as ex:  # noqa: BLE001
                 self.after(0, lambda err=ex: self._run_fail(err))
 
