@@ -24,6 +24,7 @@ import shutil
 import socket
 import sys
 import threading
+import time
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
@@ -813,10 +814,14 @@ def _erase_from_session(
             pass
 
 
-def _session_cleanup_after_stop(client: creopyson.Client, log: Callable[[str], None]) -> None:
-    """Clear non-displayed models left in session after a user stop."""
+def _session_cleanup_end_of_run(client: creopyson.Client, log: Callable[[str], None]) -> None:
+    """Clear non-displayed models from session at the end of a run."""
     try:
-        client.erase_not_displayed()
+        if hasattr(client, "file_erase_not_displayed"):
+            client.file_erase_not_displayed()
+        else:
+            # Compatibility fallback: call CREOSON directly if helper is unavailable.
+            client._creoson_post("file", "erase_not_displayed")
         log("Erased non-displayed models from Creo session.")
     except Exception as ex:  # noqa: BLE001
         log(f"Could not erase non-displayed models: {ex}")
@@ -978,18 +983,27 @@ def extract_all(
                     pass
                 _erase_from_session(client, in_session=in_session, open_name=open_name)
     finally:
-        if stopped:
-            _session_cleanup_after_stop(client, log)
+        _session_cleanup_end_of_run(client, log)
         log("Disconnecting from CREOSON …")
         try:
             client.disconnect()
         except Exception:
             pass
-        try:
-            shutil.rmtree(work_dir)
-            log("Removed local mirror folder.")
-        except OSError as ex:
-            log(f"Could not remove local mirror folder {work_dir_s}: {ex}")
+        removed = False
+        for attempt in range(1, 6):
+            try:
+                shutil.rmtree(work_dir)
+                log("Removed local mirror folder.")
+                removed = True
+                break
+            except OSError as ex:
+                if attempt == 5:
+                    log(f"Could not remove local mirror folder {work_dir_s}: {ex}")
+                else:
+                    # Creo can briefly keep a handle after disconnect; retry shortly.
+                    time.sleep(0.25 * attempt)
+        if not removed:
+            pass
 
     if parameter_names:
         column_names = parameter_names
