@@ -26,6 +26,16 @@ You do **not** open each model by hand or copy parameters from the Creo UI. You 
 | **Output file**   | Path for the HTML report (e.g. `C:\reports\parameters.html`). If you omit `.html`, it is added when you run.                                                                                                                                                                  |
 
 
+### Scan menu
+
+| Menu item       | Purpose                                                                 |
+| --------------- | ----------------------------------------------------------------------- |
+| **Parts**       | Include `.prt` files (checked by default).                              |
+| **Assemblies**  | Include `.asm` files (checked by default).                              |
+| **Drawings**    | Include `.drw` files (checked by default).                              |
+
+At least one type must stay checked. Unchecked types are **not** extracted (no report rows), but **all** model types are still copied into the local mirror so assemblies and drawings can resolve their references when you scan those types. Choices are saved as `scan_parts`, `scan_assemblies`, and `scan_drawings` in settings.
+
 ### Options menu
 
 
@@ -132,6 +142,9 @@ Example keys:
 | `creoson_host`     | CREOSON hostname                              |
 | `creoson_port`     | CREOSON port (default `9056`)                 |
 | `recursive_search` | `true` / `false` — **Options** menu checkbox  |
+| `scan_parts`       | `true` / `false` — **Scan → Parts**           |
+| `scan_assemblies`  | `true` / `false` — **Scan → Assemblies**      |
+| `scan_drawings`    | `true` / `false` — **Scan → Drawings**        |
 
 
 ## Troubleshooting

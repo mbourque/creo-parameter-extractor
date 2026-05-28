@@ -116,6 +116,9 @@ def _settings_defaults() -> dict[str, object]:
         "creoson_host": "localhost",
         "creoson_port": 9056,
         "recursive_search": False,
+        "scan_parts": True,
+        "scan_assemblies": True,
+        "scan_drawings": True,
     }
 
 
@@ -138,6 +141,14 @@ def _normalize_settings(raw: dict | None) -> dict[str, object]:
     r = raw.get("recursive_search")
     if isinstance(r, bool):
         d["recursive_search"] = r
+    for key in ("scan_parts", "scan_assemblies", "scan_drawings"):
+        v = raw.get(key)
+        if isinstance(v, bool):
+            d[key] = v
+    if not (d["scan_parts"] or d["scan_assemblies"] or d["scan_drawings"]):
+        d["scan_parts"] = True
+        d["scan_assemblies"] = True
+        d["scan_drawings"] = True
     return d
 
 
@@ -214,6 +225,27 @@ def model_kind_priority(name: str) -> int:
     if kind == "assembly":
         return 1
     return 2
+
+
+def model_file_in_scan(
+    name: str,
+    *,
+    scan_parts: bool,
+    scan_assemblies: bool,
+    scan_drawings: bool,
+) -> bool:
+    """True if this filename's extension is enabled in Scan settings."""
+    m = _MODEL_NAME.match(name)
+    if not m:
+        return False
+    ext = m.group("ext").lower()
+    if ext == "prt":
+        return scan_parts
+    if ext == "asm":
+        return scan_assemblies
+    if ext == "drw":
+        return scan_drawings
+    return False
 
 
 def absolute_preserve_drive(path: Path) -> Path:
@@ -319,11 +351,20 @@ def build_local_model_mirror(
     """
     Copy latest models into a local mirror tree.
 
+    Always includes parts, assemblies, and drawings so Creo can resolve references
+    when opening assemblies or drawings (Scan menu only limits extraction).
+
     Returns a mapping of source absolute path -> local mirrored absolute path.
     Numbered models are copied as plain ``name.ext`` in the mirrored directory.
     """
     mapping: dict[Path, Path] = {}
-    model_paths = iter_latest_model_files(source_root, recursive=recursive)
+    model_paths = iter_latest_model_files(
+        source_root,
+        recursive=recursive,
+        scan_parts=True,
+        scan_assemblies=True,
+        scan_drawings=True,
+    )
     for src in model_paths:
         try:
             rel_dir = src.parent.relative_to(source_root)
@@ -367,7 +408,14 @@ def _model_group_key(folder: Path, path: Path, *, recursive: bool) -> str:
     return base
 
 
-def iter_latest_model_files(folder: Path, *, recursive: bool = False) -> list[Path]:
+def iter_latest_model_files(
+    folder: Path,
+    *,
+    recursive: bool = False,
+    scan_parts: bool = True,
+    scan_assemblies: bool = True,
+    scan_drawings: bool = True,
+) -> list[Path]:
     """
     For each logical model name (*.prt/*.asm/*.drw with optional .N), pick one file:
     - If only ``name.ext`` exists, it is used.
@@ -386,6 +434,13 @@ def iter_latest_model_files(folder: Path, *, recursive: bool = False) -> list[Pa
     for path in candidates:
         m = _MODEL_NAME.match(path.name)
         if not m:
+            continue
+        if not model_file_in_scan(
+            path.name,
+            scan_parts=scan_parts,
+            scan_assemblies=scan_assemblies,
+            scan_drawings=scan_drawings,
+        ):
             continue
         key = _model_group_key(folder, path, recursive=recursive)
         ver_s = m.group("ver")
@@ -836,6 +891,9 @@ def extract_all(
     parameter_names: list[str],
     report_title: str = "Creo Parameter Extractor Report",
     recursive: bool = False,
+    scan_parts: bool = True,
+    scan_assemblies: bool = True,
+    scan_drawings: bool = True,
     cancel_event: threading.Event | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[str, list[str], bool]:
@@ -890,10 +948,31 @@ def extract_all(
         log(f"Local mirror folder (for Creo/CREOSON):\n  {work_dir_s}")
         log(f"Models source folder:\n  {folder}")
         local_model_map = build_local_model_mirror(folder, work_dir, recursive=recursive)
-        model_paths = list(local_model_map.keys())
+        mirrored_count = len(local_model_map)
+        model_paths = [
+            p
+            for p in local_model_map.keys()
+            if model_file_in_scan(
+                p.name,
+                scan_parts=scan_parts,
+                scan_assemblies=scan_assemblies,
+                scan_drawings=scan_drawings,
+            )
+        ]
         model_paths.sort(key=lambda p: (model_kind_priority(p.name), p.name.casefold()))
         if recursive:
             log("Recursive search enabled — including model files in subfolders.")
+        scan_labels: list[str] = []
+        if scan_parts:
+            scan_labels.append("parts")
+        if scan_assemblies:
+            scan_labels.append("assemblies")
+        if scan_drawings:
+            scan_labels.append("drawings")
+        log(
+            f"Local mirror: {mirrored_count} model file(s) (all types, for Creo references)."
+        )
+        log(f"Extracting: {', '.join(scan_labels)}.")
         log("Processing order: parts -> assemblies -> drawings.")
         log(f"Found {len(model_paths)} model file(s) to process (after version filter).")
         if cancelled():
@@ -1054,7 +1133,7 @@ def extract_all(
             title=report_title,
             parameter_names=column_names,
             rows=[],
-            errors=["No model files found in folder."],
+            errors=["No model files found in folder (check Scan types and folder path)."],
         )
     else:
         report = build_html_report(
@@ -1076,8 +1155,28 @@ class App(tk.Tk):
         self.minsize(640, 420)
 
         self.recursive_var = tk.BooleanVar(value=False)
+        self.scan_parts_var = tk.BooleanVar(value=True)
+        self.scan_assemblies_var = tk.BooleanVar(value=True)
+        self.scan_drawings_var = tk.BooleanVar(value=True)
         menubar = tk.Menu(self)
         self.config(menu=menubar)
+        scan_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Scan", menu=scan_menu)
+        scan_menu.add_checkbutton(
+            label="Parts",
+            variable=self.scan_parts_var,
+            command=lambda: self._on_scan_toggle("parts"),
+        )
+        scan_menu.add_checkbutton(
+            label="Assemblies",
+            variable=self.scan_assemblies_var,
+            command=lambda: self._on_scan_toggle("assemblies"),
+        )
+        scan_menu.add_checkbutton(
+            label="Drawings",
+            variable=self.scan_drawings_var,
+            command=lambda: self._on_scan_toggle("drawings"),
+        )
         options_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Options", menu=options_menu)
         options_menu.add_checkbutton(
@@ -1180,6 +1279,31 @@ class App(tk.Tk):
             p = 9056
         self.port_var.set(str(p))
         self.recursive_var.set(bool(s.get("recursive_search", False)))
+        self.scan_parts_var.set(bool(s.get("scan_parts", True)))
+        self.scan_assemblies_var.set(bool(s.get("scan_assemblies", True)))
+        self.scan_drawings_var.set(bool(s.get("scan_drawings", True)))
+
+    def _scan_types_selected(self) -> bool:
+        return bool(
+            self.scan_parts_var.get()
+            or self.scan_assemblies_var.get()
+            or self.scan_drawings_var.get()
+        )
+
+    def _on_scan_toggle(self, which: str) -> None:
+        if self._scan_types_selected():
+            self._save_settings()
+            return
+        messagebox.showwarning(
+            "Scan",
+            "At least one model type must be selected (Parts, Assemblies, or Drawings).",
+        )
+        if which == "parts":
+            self.scan_parts_var.set(True)
+        elif which == "assemblies":
+            self.scan_assemblies_var.set(True)
+        else:
+            self.scan_drawings_var.set(True)
 
     def _gather_settings(self) -> dict[str, object]:
         port_s = self.port_var.get().strip()
@@ -1196,6 +1320,9 @@ class App(tk.Tk):
             "creoson_host": self.host_var.get().strip() or "localhost",
             "creoson_port": pi,
             "recursive_search": bool(self.recursive_var.get()),
+            "scan_parts": bool(self.scan_parts_var.get()),
+            "scan_assemblies": bool(self.scan_assemblies_var.get()),
+            "scan_drawings": bool(self.scan_drawings_var.get()),
         }
 
     def _save_settings(self) -> bool:
@@ -1363,6 +1490,12 @@ class App(tk.Tk):
             "Network path warning", f"{path_warn}\n\nContinue anyway?"
         ):
             return
+        if not self._scan_types_selected():
+            messagebox.showerror(
+                "Scan",
+                "Select at least one model type under Scan (Parts, Assemblies, or Drawings).",
+            )
+            return
         param_names = parse_parameter_names(self.params_var.get())
         out_path = self.out_var.get().strip()
         if not out_path:
@@ -1409,6 +1542,9 @@ class App(tk.Tk):
                     output_path=outp,
                     parameter_names=param_names,
                     recursive=bool(self.recursive_var.get()),
+                    scan_parts=bool(self.scan_parts_var.get()),
+                    scan_assemblies=bool(self.scan_assemblies_var.get()),
+                    scan_drawings=bool(self.scan_drawings_var.get()),
                     cancel_event=self._cancel_event,
                     progress=self._log_from_worker,
                 )
