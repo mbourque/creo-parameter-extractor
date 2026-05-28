@@ -855,6 +855,36 @@ class TimeoutClient(creopyson.Client):
         return json_result.get("data", None)
 
 
+def _save_creo_working_dir(
+    client: creopyson.Client, log: Callable[[str], None]
+) -> str | None:
+    """Remember Creo's current working directory so it can be restored after a run."""
+    try:
+        dirname = client.creo_pwd()
+        if dirname:
+            dirname = str(dirname)
+            log(f"Saved Creo working directory:\n  {dirname}")
+            return dirname
+    except Exception as ex:  # noqa: BLE001
+        log(f"Could not read Creo working directory (will not restore): {ex}")
+    return None
+
+
+def _restore_creo_working_dir(
+    client: creopyson.Client, dirname: str | None, log: Callable[[str], None]
+) -> None:
+    """Restore Creo working directory saved at the start of extraction."""
+    if not dirname:
+        return
+    try:
+        client.creo_cd(dirname)
+        log(f"Restored Creo working directory:\n  {dirname}")
+    except Exception as ex:  # noqa: BLE001
+        log(
+            f"Could not restore Creo working directory:\n  {dirname}\n  {ex}"
+        )
+
+
 def _erase_from_session(
     client: creopyson.Client, *, in_session: str, open_name: str
 ) -> None:
@@ -933,7 +963,9 @@ def extract_all(
     client.connect()
     work_dir = extract_work_dir()
     work_dir_s = str(work_dir)
+    saved_work_dir: str | None = None
     try:
+        saved_work_dir = _save_creo_working_dir(client, log)
         try:
             running = client.is_creo_running()
             log(f"Creo running (per CREOSON): {running}")
@@ -1062,6 +1094,7 @@ def extract_all(
                     pass
                 _erase_from_session(client, in_session=in_session, open_name=open_name)
     finally:
+        _restore_creo_working_dir(client, saved_work_dir, log)
         _session_cleanup_end_of_run(client, log)
         log("Disconnecting from CREOSON …")
         try:

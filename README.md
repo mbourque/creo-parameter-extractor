@@ -90,7 +90,7 @@ Processing sequence is always:
 
 With recursion enabled, `subasm\bracket.prt` and `hardware\bracket.prt` are **two separate** models (grouped per folder + name).
 
-Files that are only `*.ext.N` on disk (e.g. `ec-j1000-0011.prt.7`, `assy.asm.5`, `drawing.drw.3`) are copied as `name.ext` into a **local per-run mirror** before open (Creo cannot open `.ext.N` by name through CREOSON). Creo’s working directory is this local mirror, not the network models folder. The mirror is removed automatically after each run.
+Files that are only `*.ext.N` on disk (e.g. `ec-j1000-0011.prt.7`, `assy.asm.5`, `drawing.drw.3`) are copied as `name.ext` into a **local per-run mirror** before open (Creo cannot open `.ext.N` by name through CREOSON). During extraction Creo’s working directory moves into that mirror; when the run finishes (or stops), the app restores the working directory it had at the start. The mirror folder is removed automatically after each run.
 
 ### Model name in the report
 
