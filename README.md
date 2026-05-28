@@ -16,19 +16,23 @@ You do **not** open each model by hand or copy parameters from the Creo UI. You 
 
 ### Fields
 
-| Field             | Purpose                                                                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Models folder** | Directory containing your `.prt`, `.asm`, and `.drw` files (and/or numbered models like `part.prt.7`, `assy.asm.5`, `drawing.drw.3`). Use **Browse…** to pick a folder.                     |
-| **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine.               |
-| **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                                             |
+
+| Field             | Purpose                                                                                                                                                                                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Models folder** | Directory containing your `.prt`, `.asm`, and `.drw` files (and/or numbered models like `part.prt.7`, `assy.asm.5`, `drawing.drw.3`). Use **Browse…** to pick a folder.                                                                                                       |
+| **CREOSON host**  | Usually `localhost` if CREOSON runs on the same PC. Use another hostname or IP only if CREOSON runs on a different machine.                                                                                                                                                   |
+| **Port**          | CREOSON port (default `9056`). Must match your CREOSON setup.                                                                                                                                                                                                                 |
 | **Parameters**    | Comma-separated parameter names to extract (e.g. `DESCRIPTION, MATERIAL, REV`). Spaces after commas are ignored. Matching is **case-insensitive**. **Leave blank** to include **every** parameter found on any processed model (columns are the union of names across parts). |
-| **Output file**   | Path for the HTML report (e.g. `C:\reports\parameters.html`). If you omit `.html`, it is added when you run. |
+| **Output file**   | Path for the HTML report (e.g. `C:\reports\parameters.html`). If you omit `.html`, it is added when you run.                                                                                                                                                                  |
+
 
 ### Options menu
 
-| Menu item                    | Purpose                                                                                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+
+| Menu item                  | Purpose                                                                                                                                                                                                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Recursively find files** | **Off by default.** When enabled, searches the models folder and **all subfolders** for `.prt`, `.asm`, `.drw` and numbered versions (`*.prt.N`, `*.asm.N`, `*.drw.N`). The same filename in different folders is treated as separate models. Saved as `recursive_search` in settings. |
+
 
 ### Run extraction
 
@@ -53,18 +57,20 @@ The log should show `Checking TCP localhost:9056 …` then `Connecting to CREOSO
 
 ### Where the app looks
 
-| **Recursively find files** | Behavior                                                                 |
-| -------------------------- | ------------------------------------------------------------------------ |
-| **Off** (default)          | Only files directly in the **Models folder** (not in subfolders).          |
-| **On**                     | Files in the models folder **and every subfolder** beneath it.             |
+
+| **Recursively find files** | Behavior                                                          |
+| -------------------------- | ----------------------------------------------------------------- |
+| **Off** (default)          | Only files directly in the **Models folder** (not in subfolders). |
+| **On**                     | Files in the models folder **and every subfolder** beneath it.    |
+
 
 ### Version pick (same folder)
 
 For each logical model name in a given folder (`name.prt`, `name.asm`, `name.drw`):
 
-- If only **`name.ext`** exists, that file is used.
+- If only `**name.ext`** exists, that file is used.
 - If only versioned files exist (`name.ext.5`, …), the **highest number** is used (e.g. `name.ext.10` over `name.ext.9`).
-- If **`name.ext`** and versioned files both exist, the **highest version** is used (e.g. `name.ext.10` over `name.ext` and `name.ext.9`).
+- If `**name.ext`** and versioned files both exist, the **highest version** is used (e.g. `name.ext.10` over `name.ext` and `name.ext.9`).
 
 Processing sequence is always:
 
@@ -88,10 +94,12 @@ The output is one **self-contained** `.html` file: styles and scripts are embedd
 
 ### Table layout
 
-| Column        | Content                                                                 |
-| ------------- | ----------------------------------------------------------------------- |
-| **Model name** | Model filename as a link (click does nothing). **Drag** the name into Creo to open the model; a tooltip on the link reminds you. Drag always uses a full absolute `file:///…` URI (`name.ext` when the source model is `name.ext.N`). |
-| *Parameter columns* | One column per requested name, in the order you listed them. If **Parameters** was blank, one column per distinct parameter name found across all successful models (union, in Creo list order). |
+
+| Column              | Content                                                                                                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Model name**      | Model filename as a link (click does nothing). **Drag** the name into Creo to open the model; a tooltip on the link reminds you. Drag always uses a full absolute `file:///…` URI (`name.ext` when the source model is `name.ext.N`). |
+| *Parameter columns* | One column per requested name, in the order you listed them. If **Parameters** was blank, one column per distinct parameter name found across all successful models (union, in Creo list order).                                      |
+
 
 The page title is **Creo Parameter Extractor Report**. Failed models appear as highlighted rows; a summary **Errors** list appears at the bottom when needed.
 
@@ -115,32 +123,37 @@ UI choices are saved to `CreoParameterExtractor_settings.json`. The file is crea
 
 Example keys:
 
-| Key                 | Purpose                                      |
-| ------------------- | -------------------------------------------- |
-| `models_folder`     | Last models directory                        |
-| `parameter_names`   | Comma-separated list (empty = all parameters) |
-| `output_file`       | Last HTML report path                        |
-| `creoson_host`      | CREOSON hostname                             |
-| `creoson_port`      | CREOSON port (default `9056`)                |
-| `recursive_search`  | `true` / `false` — **Options** menu checkbox |
+
+| Key                | Purpose                                       |
+| ------------------ | --------------------------------------------- |
+| `models_folder`    | Last models directory                         |
+| `parameter_names`  | Comma-separated list (empty = all parameters) |
+| `output_file`      | Last HTML report path                         |
+| `creoson_host`     | CREOSON hostname                              |
+| `creoson_port`     | CREOSON port (default `9056`)                 |
+| `recursive_search` | `true` / `false` — **Options** menu checkbox  |
+
 
 ## Troubleshooting
 
-| Symptom                                                 | What to try                                                                                                                      |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Hangs at “Connecting to CREOSON…” then times out (~60s) | Start Creo first, then CREOSON. Dismiss any Creo modal dialogs.                                                                  |
-| `Unknown Model Extension`                               | Usually an old issue with opening `.prt.N` directly; use the current version of this tool.                                       |
-| `Pro/TOOLKIT … General Error`                           | Open the part manually in Creo; fix regen errors or missing references. Ensure related files sit in the same folder as the part. |
-| CREOSON **Stop** hangs                                  | Exit Creo first, then stop CREOSON; or end the CREOSON/Java process in Task Manager.                                             |
-| `0 model file(s) found`                                 | Folder path wrong; no matching files in that directory; or models are in **subfolders** — enable **Options → Recursively find files**. |
-| UNC path (`\\server\share\...`) or `creo_cd` fails on network library | Point **Models folder** at the share. The app builds a local mirror under `%LOCALAPPDATA%\CreoParameterExtractor\work\run_*` and opens models from there, so Creo never uses UNC as the working directory. |
-| CREOSON: `Directory does not exist` for `Z:\...`        | Same: models are read from `Z:\` (or UNC) and opened from the local `%LOCALAPPDATA%` run mirror. |
+
+| Symptom                                                               | What to try                                                                                                                                                                                                |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hangs at “Connecting to CREOSON…” then times out (~60s)               | Start Creo first, then CREOSON. Dismiss any Creo modal dialogs.                                                                                                                                            |
+| `Unknown Model Extension`                                             | Usually an old issue with opening `.prt.N` directly; use the current version of this tool.                                                                                                                 |
+| `Pro/TOOLKIT … General Error`                                         | Open the part manually in Creo; fix regen errors or missing references. Ensure related files sit in the same folder as the part.                                                                           |
+| CREOSON **Stop** hangs                                                | Exit Creo first, then stop CREOSON; or end the CREOSON/Java process in Task Manager.                                                                                                                       |
+| `0 model file(s) found`                                               | Folder path wrong; no matching files in that directory; or models are in **subfolders** — enable **Options → Recursively find files**.                                                                     |
+| UNC path (`\\server\share\...`) or `creo_cd` fails on network library | Point **Models folder** at the share. The app builds a local mirror under `%LOCALAPPDATA%\CreoParameterExtractor\work\run_`* and opens models from there, so Creo never uses UNC as the working directory. |
+| CREOSON: `Directory does not exist` for `Z:\...`                      | Same: models are read from `Z:\` (or UNC) and opened from the local `%LOCALAPPDATA%` run mirror.                                                                                                           |
+
 
 ---
 
 ## Installation and setup
 
 ### What you need
+
 
 | Requirement         | Notes                                                                                   |
 | ------------------- | --------------------------------------------------------------------------------------- |
@@ -149,37 +162,24 @@ Example keys:
 | **J-Link**          | Included with Creo (automation interface); may need to be enabled per your PTC install. |
 | **Python 3.10+**    | Required to run this application (see below).                                           |
 
+
 Starting only the CREOSON Java server without a live Creo session will cause connection timeouts or failed opens.
 
 ### Install this application (Python)
 
 1. Open a terminal in this project folder.
 2. (Recommended) Create and activate a virtual environment:
-
-   ```bat
+  ```bat
    python -m venv venv
    venv\Scripts\activate
-   ```
-
+  ```
 3. Install dependencies:
-
-   ```bat
+  ```bat
    python -m pip install -r requirements.txt
-   ```
-
+  ```
 4. Run the application (pick one):
-
-   **Executable** (after building with `build_pyinstaller.bat`, or if `CreoParameterExtractor.exe` is in the project folder):
-
-   ```bat
-   CreoParameterExtractor.exe
-   ```
-
+  **Executable** (after building with `build_pyinstaller.bat`, or if `CreoParameterExtractor.exe` is in the project folder):
    **From source** (after step 3 above):
-
-   ```bat
-   python CreoParameterExtractor.py
-   ```
 
 ### CREOSON: where to get it and install
 
@@ -187,19 +187,21 @@ CREOSON is a small **JSON server** between this app and **Creo Parametric**. It 
 
 #### Download
 
+
 | Source                     | URL                                                                                                |
 | -------------------------- | -------------------------------------------------------------------------------------------------- |
 | **Releases (recommended)** | [github.com/SimplifiedLogic/creoson/releases](https://github.com/SimplifiedLogic/creoson/releases) |
 | **Source / docs**          | [github.com/SimplifiedLogic/creoson](https://github.com/SimplifiedLogic/creoson)                   |
 | **API reference**          | [creoson.com/functions.html](https://creoson.com/functions.html)                                   |
 
-For most users, download **CreosonServerWithSetup-\*.zip** (setup GUI, includes Java). Choose **32-bit** or **64-bit** to match your Creo install.
+
+For most users, download **CreosonServerWithSetup-.zip** (setup GUI, includes Java). Choose **32-bit** or **64-bit** to match your Creo install.
 
 #### Install CREOSON (pre-packaged)
 
 CREOSON is not a traditional installer—you unzip and run from a folder:
 
-1. Download **CreosonServerWithSetup-\*.zip** from [Releases](https://github.com/SimplifiedLogic/creoson/releases).
+1. Download **CreosonServerWithSetup-.zip** from [Releases](https://github.com/SimplifiedLogic/creoson/releases).
 2. Copy the ZIP to a permanent location (e.g. `C:\Tools\creoson\`) and **extract** it.
 3. Run **CreosonSetup.exe**.
 4. Set **Creo installation directory** (folder containing `parametric.exe`).
@@ -213,10 +215,12 @@ Allow the CREOSON port through Windows firewall on localhost if prompted.
 
 Behind the GUI, requests include `connection : connect`, `creo : cd`, `file : open`, `parameter : list`, `file : erase`, and `connection : disconnect` (via the [creopyson](https://github.com/Zepmanbc/creopyson) library). You do not send that JSON yourself.
 
+
 | Component        | Role                                                              |
 | ---------------- | ----------------------------------------------------------------- |
 | **CREOSON**      | Third-party server from Simplified Logic / GitHub releases.       |
 | **This project** | Desktop UI and batch logic; Python deps: `creopyson`, `requests`. |
+
 
 ## References
 
