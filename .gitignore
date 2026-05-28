@@ -1,5 +1,5 @@
 # Local / machine-specific
-prt_parameter_extractor_settings.json
+CreoParameterExtractor_settings.json
 models/
 
 # Generated HTML reports
